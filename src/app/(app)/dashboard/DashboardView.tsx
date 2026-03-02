@@ -93,12 +93,6 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
       </header>
 
       <div className="p-6 space-y-6">
-        {/* DEBUG BANNER - remove after confirming activities work */}
-        {debugInfo && (
-          <div className="bg-yellow-50 border border-yellow-300 rounded-xl px-4 py-2 text-xs font-mono text-yellow-800">
-            🔍 DEBUG: {debugInfo}
-          </div>
-        )}
         {/* HERO METRICS */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <HeroMetric label="Cost Per Install" avgValue={avg7("cost_per_install_gbp")} yesterdayValue={yesterday?.cost_per_install_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / total installs" sparklineData={last7.map((m) => m.cost_per_install_gbp ?? 0)} gradient="linear-gradient(135deg, #F59E0B, #F97316)" />
@@ -175,25 +169,6 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
           <PlacementTable placements={today.placement_breakdown ?? []} />
         </div>
 
-        {/* TikTok Detail */}
-        <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)" }}>
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">TikTok Ads Detail</h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            {[
-              { label: "Spend", value: formatCurrency(today.tiktok_spend_gbp) },
-              { label: "Impressions", value: formatNumber(today.tiktok_impressions) },
-              { label: "Clicks", value: formatNumber(today.tiktok_clicks) },
-              { label: "CPM", value: formatCurrency(today.tiktok_cpm) },
-              { label: "Install to Trial CR", value: formatPercent(today.install_to_trial_cr) },
-            ].map((item) => (
-              <div key={item.label} className="bg-gray-50 rounded-xl p-3">
-                <p className="text-[10px] text-gray-400 font-semibold uppercase">{item.label}</p>
-                <p className="text-lg font-bold text-gray-800 mt-0.5">{item.value}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
         {/* Data Quality */}
         {today.data_quality_checks && (
           <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)" }}>
@@ -205,6 +180,13 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Debug info at bottom */}
+        {debugInfo && (
+          <div className="text-[10px] font-mono text-gray-300 text-center py-2">
+            {debugInfo}
           </div>
         )}
       </div>

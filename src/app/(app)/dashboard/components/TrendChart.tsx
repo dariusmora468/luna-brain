@@ -53,13 +53,7 @@ function ActivityDot(activityMap: Map<string, Activity[]>) {
     const date = payload?.date;
     const hasActivity = date && activityMap.has(date);
     
-    // DEBUG: show small gray dot on every point to prove the function fires
-    // Remove this after confirming it works
-    if (!hasActivity) {
-      return (
-        <circle cx={cx} cy={cy} r={2} fill="#D1D5DB" fillOpacity={0.5} key={`debug-${index}`} />
-      );
-    }
+    if (!hasActivity) return null;
 
     const count = activityMap.get(date)?.length || 0;
     return (
@@ -203,14 +197,6 @@ export default function TrendChart({
       </div>
       <p className="text-[10px] text-gray-400 mt-2 text-center font-medium">
         Click chart to view day details
-        {activities.length > 0 && (
-          <span className="ml-2 text-amber-500">
-            ({activityMap.size} days with events, {activities.length} total)
-          </span>
-        )}
-        {activities.length === 0 && (
-          <span className="ml-2 text-red-400">(0 activities received)</span>
-        )}
       </p>
     </div>
   );
