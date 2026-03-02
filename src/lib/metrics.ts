@@ -162,11 +162,15 @@ export async function parseTikTokXLSX(buffer: ArrayBuffer): Promise<TikTokRawDat
   let clicks = 0;
 
   for (const row of rows) {
+    // Skip TikTok's summary/totals rows (e.g. "Total of X results")
+    const campaignName = String(row["Campaign name"] || row["Campaign Name"] || "");
+    if (campaignName.toLowerCase().startsWith("total")) continue;
+    
     // TikTok columns may vary — handle common variations
     installs += Number(row["Result"] || row["Conversions"] || row["Install"] || 0);
     spend += Number(row["Cost"] || row["Spend"] || row["Total Cost"] || 0);
     impressions += Number(row["Impressions"] || row["Impression"] || 0);
-    clicks += Number(row["Clicks"] || row["Click"] || 0);
+    clicks += Number(row["Clicks"] || row["Clicks (destination)"] || row["Click"] || 0);
   }
 
   const cpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
