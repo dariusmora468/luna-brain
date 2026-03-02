@@ -119,7 +119,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Upsert metrics one by one for better error tracking
+    // Delete existing metrics for all dates in the upload, then insert fresh
+    // This guarantees override behavior even if unique constraints are missing
+    const uploadDates = metricsToInsert.map(m => m.date as string);
+    if (uploadDates.length > 0) {
+      await supabase
+        .from("metrics")
+        .delete()
+        .eq("client_id", "luna")
+        .in("date", uploadDates);
+    }
+
     let metricsCount = 0;
     let metricsErrors: string[] = [];
 
@@ -127,7 +137,7 @@ export async function POST(request: NextRequest) {
       const row = metricsToInsert[i];
       const { error } = await supabase
         .from("metrics")
-        .upsert(row, { onConflict: "client_id,date" });
+        .insert(row);
       if (error) {
         metricsErrors.push(`Row ${i} (${row.date}): ${error.message}`);
       } else {

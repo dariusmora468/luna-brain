@@ -117,8 +117,14 @@ export async function POST(request: Request) {
       console.warn("Data quality check failed:", metrics.data_quality_checks);
     }
 
-    // Upsert to database
-    const { error } = await supabase.from("metrics").upsert(
+    // Delete existing row for this date, then insert fresh (guarantees override)
+    await supabase
+      .from("metrics")
+      .delete()
+      .eq("client_id", metrics.client_id)
+      .eq("date", metrics.date);
+
+    const { error } = await supabase.from("metrics").insert(
       {
         ...metrics,
         // Supabase expects JSON columns as objects
@@ -126,8 +132,7 @@ export async function POST(request: Request) {
         data_quality_checks: metrics.data_quality_checks as unknown,
         computed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      },
-      { onConflict: "client_id,date" }
+      }
     );
 
     if (error) {
