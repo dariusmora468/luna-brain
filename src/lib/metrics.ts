@@ -113,7 +113,7 @@ export function parseConversionsCSV(csvText: string, targetDate: string): Conver
   const rows = parsed.data as Record<string, string>[];
 
   return rows
-    .filter((row) => row["date"] === targetDate)
+    .filter((row) => (row["date"] || "").substring(0, 10) === targetDate)
     .map((row) => ({
       date: row["date"],
       platform: row["platform"],
@@ -133,7 +133,7 @@ export function parseScreenViewsCSV(csvText: string, targetDate: string): Screen
   const rows = parsed.data as Record<string, string>[];
 
   return rows
-    .filter((row) => row["date"] === targetDate)
+    .filter((row) => (row["date"] || "").substring(0, 10) === targetDate)
     .map((row) => ({
       date: row["date"],
       platform: row["platform"],
