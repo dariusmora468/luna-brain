@@ -1,5 +1,31 @@
 # luna Brain - Changelog
 
+## 2026-03-02 - Robustness Audit + Fixes
+
+**What was done:**
+Full codebase audit against DB schema, docs, and past chat history. Found and fixed 7 issues:
+
+1. **ARCHITECTURE.md rewritten** - Old version referenced wrong Next.js version (14 vs 16.1.6), wrong auth system (Supabase Auth vs custom password hash), non-existent API routes (/api/cron, /api/slack, /api/auth), and wrong DB column names. Now matches reality exactly.
+2. **Debug endpoint secured** - `/api/debug` was unauthenticated. Now requires valid session cookie.
+3. **Error boundary added** - New `src/app/(app)/error.tsx` catches render/data errors. Friendly retry screen instead of crashing.
+4. **Zod removed** - Listed as dependency but never imported. Removed from package.json.
+5. **enrichMetrics() documented** - Added comment explaining client-side fallback purpose and confirming formula parity with server-side.
+6. **.env.example created** - SETUP.md referenced it but it didn't exist.
+7. **RLS policies fixed** - Anon key restricted to SELECT only. Service role gets full access.
+
+---
+
+## 2026-03-02 - GitHub + Vercel Auto-Deploy
+
+**What was done:**
+- Created GitHub repo: github.com/dariusmora468/luna-brain
+- Pushed full codebase (76 objects)
+- Connected repo to Vercel for auto-deploy on push to main
+
+**New workflow:** `git add . && git commit -m "message" && git push` auto-deploys to luna-brain.vercel.app
+
+---
+
 ## 2026-03-01 - Visual Redesign Complete + Cleanup
 
 **What was done:**

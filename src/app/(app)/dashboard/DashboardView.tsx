@@ -27,6 +27,10 @@ interface Props {
   activities: Activity[];
 }
 
+// Fallback computation for historical rows imported from Google Sheets,
+// which may have null CPI/CPT/CPS when there was no spend or no trials.
+// Daily uploads via /api/metrics/upload compute these server-side in computeMetrics().
+// This ensures the dashboard always displays computed values regardless of data source.
 function enrichMetrics(m: DailyMetrics): DailyMetrics {
   return {
     ...m,

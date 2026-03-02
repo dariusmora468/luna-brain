@@ -104,23 +104,23 @@ CREATE TABLE IF NOT EXISTS data_pipeline_logs (
 );
 
 -- ============================================================
--- Row Level Security (optional but recommended)
+-- Row Level Security
 -- ============================================================
 
 -- Enable RLS on metrics
 ALTER TABLE metrics ENABLE ROW LEVEL SECURITY;
 
--- Allow service role full access (API routes use this)
-CREATE POLICY "Service role full access" ON metrics
-  FOR ALL USING (true) WITH CHECK (true);
-
--- Allow anon key read-only access (for client-side queries)
-CREATE POLICY "Anon read access" ON metrics
+-- Anon key: read-only access (used by client-side browser queries)
+CREATE POLICY "Anon read only" ON metrics
   FOR SELECT USING (true);
+
+-- Service role: full access (used by API routes server-side)
+CREATE POLICY "Service role write" ON metrics
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- Same for insights
 ALTER TABLE daily_insights ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Service role full access" ON daily_insights
-  FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Anon read access" ON daily_insights
+CREATE POLICY "Anon read only" ON daily_insights
   FOR SELECT USING (true);
+CREATE POLICY "Service role write" ON daily_insights
+  FOR ALL TO service_role USING (true) WITH CHECK (true);

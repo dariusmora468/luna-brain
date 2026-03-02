@@ -1,9 +1,15 @@
 import { createServerClient } from "@/lib/supabase";
+import { verifySession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const isAuthenticated = await verifySession();
+  if (!isAuthenticated) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const supabase = createServerClient();
 
   const { data: metrics, error } = await supabase
