@@ -48,6 +48,14 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
   const selectedMetrics = selectedDate ? history.find((m) => m.date === selectedDate) ?? null : null;
   const selectedActivities = selectedDate ? activities.filter((a) => a.date === selectedDate) : [];
 
+  // 7-day trailing averages for hero cards
+  const last7 = history.slice(-7);
+  function avg7(key: keyof DailyMetrics): number | null {
+    const vals = last7.map((m) => m[key]).filter((v): v is number => v !== null && v !== undefined && typeof v === "number");
+    if (vals.length === 0) return null;
+    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
+  }
+
   function handleChartClick(date: string) {
     setSelectedDate(selectedDate === date ? null : date);
   }
@@ -82,9 +90,9 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
       <div className="p-6 space-y-6">
         {/* HERO METRICS */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <HeroMetric label="Cost Per Install" value={today.cost_per_install_gbp} previousValue={yesterday?.cost_per_install_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / total installs" sparklineData={history.slice(-7).map((m) => m.cost_per_install_gbp ?? 0)} gradient="linear-gradient(135deg, #F59E0B, #F97316)" />
-          <HeroMetric label="Cost Per Trial" value={today.cost_per_trial_gbp} previousValue={yesterday?.cost_per_trial_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / trial starts" sparklineData={history.slice(-7).map((m) => m.cost_per_trial_gbp ?? 0)} gradient="linear-gradient(135deg, #10B981, #059669)" />
-          <HeroMetric label="Cost Per Subscriber" value={today.cost_per_subscriber_gbp} previousValue={yesterday?.cost_per_subscriber_gbp ?? null} format="currency" invertColors tooltip="TikTok spend / new subscribers (7-day lag)" sparklineData={history.slice(-7).map((m) => m.cost_per_subscriber_gbp ?? 0)} gradient="linear-gradient(135deg, #8B5CF6, #7C3AED)" />
+          <HeroMetric label="Cost Per Install" avgValue={avg7("cost_per_install_gbp")} yesterdayValue={yesterday?.cost_per_install_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / total installs" sparklineData={last7.map((m) => m.cost_per_install_gbp ?? 0)} gradient="linear-gradient(135deg, #F59E0B, #F97316)" />
+          <HeroMetric label="Cost Per Trial" avgValue={avg7("cost_per_trial_gbp")} yesterdayValue={yesterday?.cost_per_trial_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / trial starts" sparklineData={last7.map((m) => m.cost_per_trial_gbp ?? 0)} gradient="linear-gradient(135deg, #10B981, #059669)" />
+          <HeroMetric label="Cost Per Subscriber" avgValue={avg7("cost_per_subscriber_gbp")} yesterdayValue={yesterday?.cost_per_subscriber_gbp ?? null} format="currency" invertColors tooltip="TikTok spend / new subscribers (7-day lag)" sparklineData={last7.map((m) => m.cost_per_subscriber_gbp ?? 0)} gradient="linear-gradient(135deg, #8B5CF6, #7C3AED)" />
         </div>
 
         {/* TIME RANGE */}

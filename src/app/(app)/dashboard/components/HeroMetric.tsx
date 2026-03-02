@@ -5,8 +5,8 @@ import { formatValue, percentChange, getTrend } from "@/lib/utils";
 
 interface Props {
   label: string;
-  value: number | null;
-  previousValue: number | null;
+  avgValue: number | null;
+  yesterdayValue: number | null;
   format: "currency" | "number" | "decimal" | "percent";
   invertColors?: boolean;
   tooltip?: string;
@@ -46,15 +46,8 @@ function MiniSparkline({ data, color }: { data: number[]; color: string }) {
   );
 }
 
-export default function HeroMetric({ label, value, previousValue, format, invertColors = false, tooltip, sparklineData, gradient }: Props) {
+export default function HeroMetric({ label, avgValue, yesterdayValue, format, invertColors = false, tooltip, sparklineData, gradient }: Props) {
   const [showTooltip, setShowTooltip] = useState(false);
-  const change = value !== null && previousValue !== null ? percentChange(value, previousValue) : null;
-  const trend = getTrend(change, invertColors);
-
-  const isPositive = (trend.direction === "up" && !invertColors) || (trend.direction === "down" && invertColors);
-  const trendBg = trend.direction === "flat" ? "bg-gray-100 text-gray-500"
-    : isPositive ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-500";
-
   const hasGradient = !!gradient;
 
   return (
@@ -77,22 +70,25 @@ export default function HeroMetric({ label, value, previousValue, format, invert
       <div className="flex items-start justify-between">
         <div>
           <p className={`text-xs font-semibold uppercase tracking-wider mb-2 ${hasGradient ? "text-white/70" : "text-gray-400"}`}>{label}</p>
+
+          {/* 7-day trailing average (main number) */}
           <p className={`text-3xl font-extrabold ${hasGradient ? "text-white" : "text-gray-900"}`}>
-            {formatValue(value, format)}
+            {formatValue(avgValue, format)}
           </p>
-          {change !== null && (
-            <div className="flex items-center gap-2 mt-3">
-              <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-semibold ${hasGradient ? "bg-white/20 text-white" : trendBg}`}>
-                {trend.arrow} {Math.abs(change).toFixed(1)}%
-              </span>
-              <span className={`text-[10px] ${hasGradient ? "text-white/60" : "text-gray-400"}`}>vs yesterday</span>
-            </div>
-          )}
+          <p className={`text-[10px] mt-1 ${hasGradient ? "text-white/50" : "text-gray-400"}`}>7-day avg</p>
+
+          {/* Yesterday's value */}
+          <div className="mt-3 flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${hasGradient ? "bg-white/20 text-white" : "bg-gray-100 text-gray-700"}`}>
+              {formatValue(yesterdayValue, format)}
+            </span>
+            <span className={`text-[10px] ${hasGradient ? "text-white/50" : "text-gray-400"}`}>yesterday</span>
+          </div>
         </div>
         {sparklineData && sparklineData.length > 1 && (
           <MiniSparkline
             data={sparklineData}
-            color={hasGradient ? "rgba(255,255,255,0.7)" : (isPositive ? "#10B981" : "#EF4444")}
+            color={hasGradient ? "rgba(255,255,255,0.7)" : "#F59E0B"}
           />
         )}
       </div>
