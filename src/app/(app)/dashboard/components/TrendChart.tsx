@@ -47,11 +47,23 @@ interface Props {
 function ActivityDot(activityMap: Map<string, Activity[]>) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return function Dot(props: any) {
-    const { cx, cy, payload } = props;
-    if (!payload?.date || !activityMap.has(payload.date)) return null;
-    const count = activityMap.get(payload.date)?.length || 0;
+    const { cx, cy, payload, index } = props;
+    if (cx === undefined || cy === undefined) return null;
+    
+    const date = payload?.date;
+    const hasActivity = date && activityMap.has(date);
+    
+    // DEBUG: show small gray dot on every point to prove the function fires
+    // Remove this after confirming it works
+    if (!hasActivity) {
+      return (
+        <circle cx={cx} cy={cy} r={2} fill="#D1D5DB" fillOpacity={0.5} key={`debug-${index}`} />
+      );
+    }
+
+    const count = activityMap.get(date)?.length || 0;
     return (
-      <g>
+      <g key={`activity-${index}`}>
         <polygon
           points={`${cx},${cy - 6} ${cx + 5},${cy} ${cx},${cy + 6} ${cx - 5},${cy}`}
           fill="#F59E0B"
@@ -189,7 +201,17 @@ export default function TrendChart({
           </AreaChart>
         </ResponsiveContainer>
       </div>
-      <p className="text-[10px] text-gray-400 mt-2 text-center font-medium">Click chart to view day details</p>
+      <p className="text-[10px] text-gray-400 mt-2 text-center font-medium">
+        Click chart to view day details
+        {activities.length > 0 && (
+          <span className="ml-2 text-amber-500">
+            ({activityMap.size} days with events, {activities.length} total)
+          </span>
+        )}
+        {activities.length === 0 && (
+          <span className="ml-2 text-red-400">(0 activities received)</span>
+        )}
+      </p>
     </div>
   );
 }
