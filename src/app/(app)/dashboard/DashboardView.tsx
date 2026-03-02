@@ -25,6 +25,7 @@ interface Props {
   yesterday: DailyMetrics | null;
   history: DailyMetrics[];
   activities: Activity[];
+  debugInfo?: string;
 }
 
 // Fallback computation for historical rows imported from Google Sheets,
@@ -40,7 +41,7 @@ function enrichMetrics(m: DailyMetrics): DailyMetrics {
   };
 }
 
-export default function DashboardView({ today: rawToday, yesterday: rawYesterday, history: rawHistory, activities }: Props) {
+export default function DashboardView({ today: rawToday, yesterday: rawYesterday, history: rawHistory, activities, debugInfo }: Props) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<"7d" | "30d" | "all">("7d");
 
@@ -92,6 +93,12 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
       </header>
 
       <div className="p-6 space-y-6">
+        {/* DEBUG BANNER - remove after confirming activities work */}
+        {debugInfo && (
+          <div className="bg-yellow-50 border border-yellow-300 rounded-xl px-4 py-2 text-xs font-mono text-yellow-800">
+            🔍 DEBUG: {debugInfo}
+          </div>
+        )}
         {/* HERO METRICS */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <HeroMetric label="Cost Per Install" avgValue={avg7("cost_per_install_gbp")} yesterdayValue={yesterday?.cost_per_install_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / total installs" sparklineData={last7.map((m) => m.cost_per_install_gbp ?? 0)} gradient="linear-gradient(135deg, #F59E0B, #F97316)" />
@@ -112,22 +119,22 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
 
         {/* COST TREND CHARTS */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <TrendChart title="Cost Per Install" data={filteredHistory} dataKey="cost_per_install_gbp" color="#F59E0B" onDayClick={handleChartClick} selectedDate={selectedDate} />
-          <TrendChart title="Cost Per Trial" data={filteredHistory} dataKey="cost_per_trial_gbp" color="#10B981" onDayClick={handleChartClick} selectedDate={selectedDate} />
-          <TrendChart title="Cost Per Subscriber" data={filteredHistory} dataKey="cost_per_subscriber_gbp" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} />
+          <TrendChart title="Cost Per Install" data={filteredHistory} dataKey="cost_per_install_gbp" color="#F59E0B" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title="Cost Per Trial" data={filteredHistory} dataKey="cost_per_trial_gbp" color="#10B981" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title="Cost Per Subscriber" data={filteredHistory} dataKey="cost_per_subscriber_gbp" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
         </div>
 
         {/* VOLUME CHARTS */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <TrendChart title="New Installs" data={filteredHistory} dataKey="tiktok_installs" color="#3B82F6" onDayClick={handleChartClick} selectedDate={selectedDate} />
-          <TrendChart title="New Trials" data={filteredHistory} dataKey="total_trials" secondaryDataKey="non_onboarding_trials" secondaryLabel="Non-Onboarding" color="#10B981" secondaryColor="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} />
-          <TrendChart title="Subscribers" data={filteredHistory} dataKey="new_subscriptions" secondaryDataKey="churn" secondaryLabel="Churn" color="#10B981" secondaryColor="#EF4444" onDayClick={handleChartClick} selectedDate={selectedDate} />
+          <TrendChart title="New Installs" data={filteredHistory} dataKey="tiktok_installs" color="#3B82F6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title="New Trials" data={filteredHistory} dataKey="total_trials" secondaryDataKey="non_onboarding_trials" secondaryLabel="Non-Onboarding" color="#10B981" secondaryColor="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title="Subscribers" data={filteredHistory} dataKey="new_subscriptions" secondaryDataKey="churn" secondaryLabel="Churn" color="#10B981" secondaryColor="#EF4444" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
         </div>
 
         {/* REVENUE & ROAS */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <TrendChart title="Revenue" data={filteredHistory} dataKey="total_revenue_gbp" color="#F59E0B" onDayClick={handleChartClick} selectedDate={selectedDate} />
-          <TrendChart title="ROAS (7-day)" data={filteredHistory} dataKey="roas_7d" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} />
+          <TrendChart title="Revenue" data={filteredHistory} dataKey="total_revenue_gbp" color="#F59E0B" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title="ROAS (7-day)" data={filteredHistory} dataKey="roas_7d" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
         </div>
 
         {/* DAY DETAIL */}

@@ -16,12 +16,18 @@ export default async function DashboardPage() {
     .limit(90);
 
   // Fetch recent activities for clickable days
-  const { data: activities } = await supabase
+  const { data: activities, error: activitiesError } = await supabase
     .from("activities")
     .select("*")
     .eq("client_id", "luna")
     .order("date", { ascending: false })
     .limit(200);
+
+  // DEBUG: log to server console so we can check Vercel logs
+  if (activitiesError) {
+    console.error("ACTIVITIES_FETCH_ERROR:", JSON.stringify(activitiesError));
+  }
+  console.log("ACTIVITIES_COUNT:", activities?.length ?? "null", "METRICS_COUNT:", metrics?.length ?? "null");
 
   const today = metrics?.[0] as DailyMetrics | null;
   const yesterday = metrics?.[1] as DailyMetrics | null;
@@ -33,6 +39,8 @@ export default async function DashboardPage() {
       yesterday={yesterday}
       history={history}
       activities={activities ?? []}
+      // DEBUG: pass error info for display
+      debugInfo={`Activities: ${activities?.length ?? "null"}, Error: ${activitiesError ? JSON.stringify(activitiesError) : "none"}`}
     />
   );
 }
