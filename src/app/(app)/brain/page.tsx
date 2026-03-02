@@ -30,19 +30,18 @@ const PLACEHOLDER_INSIGHTS = [
 ];
 
 export default function BrainPage() {
-  const [activeTab, setActiveTab] = useState<"docs" | "chat" | "insights">("docs");
-  const [chatInput, setChatInput] = useState("");
+  const [activeTab, setActiveTab] = useState<"docs" | "insights">("docs");
 
   return (
     <div className="min-h-screen" style={{ background: "#F8F5F0" }}>
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm sticky top-0 z-30" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
         <div className="px-6 py-4">
-          <h1 className="text-lg font-bold text-gray-900">Knowledge Base & AI Brain</h1>
-          <p className="text-xs text-gray-400">Your company&apos;s central intelligence hub</p>
+          <h1 className="text-lg font-bold text-gray-900">Knowledge Base</h1>
+          <p className="text-xs text-gray-400">Documents, strategy docs, and team knowledge</p>
         </div>
         <div className="px-6 flex gap-1">
-          {(["docs", "chat", "insights"] as const).map((tab) => (
+          {(["docs", "insights"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -52,7 +51,7 @@ export default function BrainPage() {
                   : "border-transparent text-gray-400 hover:text-gray-600"
               }`}
             >
-              {tab === "docs" ? "Documents" : tab === "chat" ? "AI Chat" : "Strategic Insights"}
+              {tab === "docs" ? "Documents" : "Strategic Insights"}
             </button>
           ))}
         </div>
@@ -107,63 +106,6 @@ export default function BrainPage() {
                   </div>
                 );
               })}
-            </div>
-          </div>
-        )}
-
-        {/* AI Chat Tab */}
-        {activeTab === "chat" && (
-          <div className="max-w-2xl mx-auto">
-            <div className="bg-white rounded-2xl overflow-hidden" style={{ boxShadow: "var(--shadow-md)" }}>
-              {/* Chat messages area */}
-              <div className="p-8 min-h-[400px] flex flex-col items-center justify-center">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: "linear-gradient(135deg, #F59E0B, #F97316)" }}>
-                  <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
-                  </svg>
-                </div>
-                <h2 className="text-lg font-bold text-gray-900 mb-2">luna Brain AI</h2>
-                <p className="text-sm text-gray-500 text-center max-w-md mb-6">
-                  AI Brain is being connected. Coming soon — ask questions about your data, get instant answers.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-md">
-                  {[
-                    "What was our best day for trials last week?",
-                    "Compare US vs UK performance since launch",
-                    "What's our ROAS trend — should we scale spend?",
-                    "Summarize recent product decisions and impact",
-                  ].map((q, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setChatInput(q)}
-                      className="text-left px-3 py-2 bg-gray-50 hover:bg-amber-50 border border-gray-200 hover:border-amber-200 rounded-xl text-xs text-gray-600 hover:text-amber-700 transition-all duration-200"
-                    >
-                      &ldquo;{q}&rdquo;
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Input bar */}
-              <div className="border-t border-gray-100 p-4" style={{ background: "#FAFAF8" }}>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Ask anything about your business..."
-                    className="flex-1 bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
-                  />
-                  <button
-                    disabled
-                    className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white/70 cursor-not-allowed"
-                    style={{ background: "linear-gradient(135deg, #F59E0B80, #F9731680)" }}
-                  >
-                    Send
-                  </button>
-                </div>
-                <p className="text-[10px] text-gray-400 mt-2 text-center">AI chat will be connected in v2 — with access to your metrics, timeline, and knowledge base</p>
-              </div>
             </div>
           </div>
         )}
