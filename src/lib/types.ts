@@ -55,6 +55,17 @@ export interface DailyMetrics {
   us_revenue_gbp: number;
   gb_revenue_gbp: number;
 
+  // Revenue by audience
+  parent_revenue_gbp: number;
+  teen_revenue_gbp: number;
+
+  // Revenue by plan
+  rev_parent_annual_gbp: number;
+  rev_parent_monthly_gbp: number;
+  rev_teen_annual_gbp: number;
+  rev_teen_monthly_gbp: number;
+  rev_teen_weekly_gbp: number;
+
   // Non-onboarding placement detail
   placement_breakdown: PlacementBreakdown[] | null;
 

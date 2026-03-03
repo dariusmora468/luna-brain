@@ -2,13 +2,12 @@
 
 import { useState, useMemo } from "react";
 import type { DailyMetrics } from "@/lib/types";
-import { formatCurrency, formatNumber, formatPercent, formatDecimal, percentChange, getTrend, formatDateShort, formatDateLong } from "@/lib/utils";
 import HeroMetric from "./components/HeroMetric";
 import TrendChart from "./components/TrendChart";
 import DayDetailPanel from "./components/DayDetailPanel";
 import InsightsPanel from "./components/InsightsPanel";
 import ABTestCard from "./components/ABTestCard";
-import PlacementTable from "./components/PlacementTable";
+import SegmentedRevenueChart from "./components/SegmentedRevenueChart";
 
 interface Activity {
   id: number;
@@ -125,11 +124,8 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
           <TrendChart title="Subscribers" data={filteredHistory} dataKey="new_subscriptions" secondaryDataKey="churn" secondaryLabel="Churn" color="#10B981" secondaryColor="#EF4444" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
         </div>
 
-        {/* REVENUE & ROAS */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <TrendChart title="Revenue" data={filteredHistory} dataKey="total_revenue_gbp" color="#F59E0B" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
-          <TrendChart title="ROAS (7-day)" data={filteredHistory} dataKey="roas_7d" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
-        </div>
+        {/* REVENUE (segmented) */}
+        <SegmentedRevenueChart data={filteredHistory} onDayClick={handleChartClick} selectedDate={selectedDate} />
 
         {/* DAY DETAIL */}
         {selectedDate && <DayDetailPanel date={selectedDate} metrics={selectedMetrics} activities={selectedActivities} onClose={() => setSelectedDate(null)} />}
@@ -137,51 +133,8 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
         {/* AI INSIGHTS */}
         <InsightsPanel today={today} yesterday={yesterday} history={history} />
 
-        {/* DETAILED BREAKDOWN */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)" }}>
-            <h3 className="text-sm font-semibold text-gray-700 mb-4">Revenue by Plan</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center"><span className="text-gray-600 text-sm">Annual Discount (£19.99)</span><span className="text-gray-800 font-semibold text-sm">{today.annual_discount_trials} trials &middot; {formatCurrency(today.annual_discount_trials * 19.99)}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-600 text-sm">Annual Full (£39.99)</span><span className="text-gray-800 font-semibold text-sm">{today.annual_full_trials} trials &middot; {formatCurrency(today.annual_full_trials * 39.99)}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-600 text-sm">Monthly (£4.99)</span><span className="text-gray-800 font-semibold text-sm">{today.monthly_trials} trials &middot; {formatCurrency(today.monthly_trials * 4.99)}</span></div>
-              <div className="border-t border-gray-100 pt-3 flex justify-between items-center"><span className="text-gray-700 font-semibold text-sm">Trial Value</span><span className="text-amber-600 font-bold">{formatCurrency(today.potential_trial_value_gbp)}</span></div>
-              <div className="flex justify-between items-center"><span className="text-gray-700 font-semibold text-sm">Store Revenue</span><span className="text-gray-800 font-bold">{formatCurrency(today.total_revenue_gbp)}</span></div>
-            </div>
-          </div>
-          <ABTestCard today={today} />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)" }}>
-            <h3 className="text-sm font-semibold text-gray-700 mb-4">Market Breakdown</h3>
-            <div className="space-y-4">
-              <div>
-                <div className="flex justify-between mb-1.5"><span className="text-gray-600 text-sm font-medium">US</span><span className="text-gray-800 font-semibold text-sm">{today.us_trials} trials</span></div>
-                <div className="w-full bg-gray-100 rounded-full h-2.5"><div className="bg-gradient-to-r from-amber-400 to-amber-500 h-2.5 rounded-full transition-all" style={{ width: `${today.total_trials > 0 ? (today.us_trials / today.total_trials) * 100 : 0}%` }} /></div>
-              </div>
-              <div>
-                <div className="flex justify-between mb-1.5"><span className="text-gray-600 text-sm font-medium">GB</span><span className="text-gray-800 font-semibold text-sm">{today.gb_trials} trials</span></div>
-                <div className="w-full bg-gray-100 rounded-full h-2.5"><div className="bg-gradient-to-r from-emerald-400 to-emerald-500 h-2.5 rounded-full transition-all" style={{ width: `${today.total_trials > 0 ? (today.gb_trials / today.total_trials) * 100 : 0}%` }} /></div>
-              </div>
-            </div>
-          </div>
-          <PlacementTable placements={today.placement_breakdown ?? []} />
-        </div>
-
-        {/* Data Quality */}
-        {today.data_quality_checks && (
-          <div className="bg-white rounded-2xl p-6" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)" }}>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Data Quality</h3>
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(today.data_quality_checks).map(([key, passed]) => (
-                <span key={key} className={`px-3 py-1.5 rounded-full text-xs font-semibold ${passed ? "bg-emerald-50 text-emerald-600 border border-emerald-200" : "bg-red-50 text-red-500 border border-red-200"}`}>
-                  {passed ? "✓" : "✗"} {key.replace(/_/g, " ")}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* A/B TEST */}
+        <ABTestCard today={today} />
 
         {/* Debug info at bottom */}
         {debugInfo && (
