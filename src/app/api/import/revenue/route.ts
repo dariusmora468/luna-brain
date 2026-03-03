@@ -102,7 +102,8 @@ async function importStores(supabase: any, text: string): Promise<number> {
     const apple = safeFloat(row["apple"]);
     const google = safeFloat(row["google"]);
 
-    const { error } = await supabase
+    // Try update first
+    const { data } = await supabase
       .from("metrics")
       .update({
         apple_revenue_gbp: apple,
@@ -110,9 +111,24 @@ async function importStores(supabase: any, text: string): Promise<number> {
         total_revenue_gbp: Math.round((apple + google) * 100) / 100,
       })
       .eq("client_id", "luna")
-      .eq("date", date);
+      .eq("date", date)
+      .select("id");
 
-    if (!error) count++;
+    if (data && data.length > 0) {
+      count++;
+    } else {
+      // No existing row, insert one
+      const { error: insertErr } = await supabase
+        .from("metrics")
+        .insert({
+          client_id: "luna",
+          date,
+          apple_revenue_gbp: apple,
+          google_revenue_gbp: google,
+          total_revenue_gbp: Math.round((apple + google) * 100) / 100,
+        });
+      if (!insertErr) count++;
+    }
   }
   return count;
 }
@@ -140,16 +156,26 @@ async function importCountry(supabase: any, text: string): Promise<number> {
       }
     }
 
-    const { error } = await supabase
-      .from("metrics")
-      .update({
-        gb_revenue_gbp: Math.round(ukRev * 100) / 100,
-        us_revenue_gbp: Math.round(usRev * 100) / 100,
-      })
-      .eq("client_id", "luna")
-      .eq("date", date);
+    const updateData = {
+      gb_revenue_gbp: Math.round(ukRev * 100) / 100,
+      us_revenue_gbp: Math.round(usRev * 100) / 100,
+    };
 
-    if (!error) count++;
+    const { data } = await supabase
+      .from("metrics")
+      .update(updateData)
+      .eq("client_id", "luna")
+      .eq("date", date)
+      .select("id");
+
+    if (data && data.length > 0) {
+      count++;
+    } else {
+      const { error: insertErr } = await supabase
+        .from("metrics")
+        .insert({ client_id: "luna", date, ...updateData });
+      if (!insertErr) count++;
+    }
   }
   return count;
 }
@@ -180,7 +206,6 @@ async function importPlans(supabase: any, text: string): Promise<number> {
       const isParent = lower.includes("parent");
       const isAnnual = lower.includes("annual");
       const isWeekly = lower.includes("weekly");
-      // Everything else is monthly
 
       if (isParent) {
         parentRevenue += val;
@@ -201,21 +226,31 @@ async function importPlans(supabase: any, text: string): Promise<number> {
       }
     }
 
-    const { error } = await supabase
-      .from("metrics")
-      .update({
-        parent_revenue_gbp: Math.round(parentRevenue * 100) / 100,
-        teen_revenue_gbp: Math.round(teenRevenue * 100) / 100,
-        rev_parent_annual_gbp: Math.round(revParentAnnual * 100) / 100,
-        rev_parent_monthly_gbp: Math.round(revParentMonthly * 100) / 100,
-        rev_teen_annual_gbp: Math.round(revTeenAnnual * 100) / 100,
-        rev_teen_monthly_gbp: Math.round(revTeenMonthly * 100) / 100,
-        rev_teen_weekly_gbp: Math.round(revTeenWeekly * 100) / 100,
-      })
-      .eq("client_id", "luna")
-      .eq("date", date);
+    const updateData = {
+      parent_revenue_gbp: Math.round(parentRevenue * 100) / 100,
+      teen_revenue_gbp: Math.round(teenRevenue * 100) / 100,
+      rev_parent_annual_gbp: Math.round(revParentAnnual * 100) / 100,
+      rev_parent_monthly_gbp: Math.round(revParentMonthly * 100) / 100,
+      rev_teen_annual_gbp: Math.round(revTeenAnnual * 100) / 100,
+      rev_teen_monthly_gbp: Math.round(revTeenMonthly * 100) / 100,
+      rev_teen_weekly_gbp: Math.round(revTeenWeekly * 100) / 100,
+    };
 
-    if (!error) count++;
+    const { data } = await supabase
+      .from("metrics")
+      .update(updateData)
+      .eq("client_id", "luna")
+      .eq("date", date)
+      .select("id");
+
+    if (data && data.length > 0) {
+      count++;
+    } else {
+      const { error: insertErr } = await supabase
+        .from("metrics")
+        .insert({ client_id: "luna", date, ...updateData });
+      if (!insertErr) count++;
+    }
   }
   return count;
 }
