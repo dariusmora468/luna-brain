@@ -89,10 +89,7 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
-  const [addingRow, setAddingRow] = useState(false);
-  const [newDate, setNewDate] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const dateInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -100,12 +97,6 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
       inputRef.current.select();
     }
   }, [editing]);
-
-  useEffect(() => {
-    if (addingRow && dateInputRef.current) {
-      dateInputRef.current.focus();
-    }
-  }, [addingRow]);
 
   const handleCellClick = useCallback((date: string, key: string, currentValue: number | null) => {
     const col = COLUMNS.find(c => c.key === key);
@@ -186,53 +177,6 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
     }
   }, [editing, handleSave, handleCellClick, data]);
 
-  const handleAddRow = useCallback(async () => {
-    if (!newDate) return;
-
-    // Check if date already exists
-    if (data.some(r => r.date === newDate)) {
-      alert("A row for this date already exists");
-      return;
-    }
-
-    const emptyRow: Record<string, unknown> = {
-      client_id: "luna",
-      date: newDate,
-      tiktok_installs: 0, tiktok_spend_gbp: 0, tiktok_impressions: 0, tiktok_clicks: 0, tiktok_cpm: null,
-      apple_revenue_gbp: 0, google_revenue_gbp: 0, total_revenue_gbp: 0,
-      new_subscriptions: 0, churn: 0, net_subscriptions: 0,
-      total_trials: 0, onboarding_trials: 0, non_onboarding_trials: 0,
-      annual_discount_trials: 0, annual_full_trials: 0, monthly_trials: 0,
-      cost_per_install_gbp: null, cost_per_trial_gbp: null, cost_per_subscriber_gbp: null,
-      install_to_trial_cr: null, roas_7d: null, potential_trial_value_gbp: null,
-      ab_variant_a_viewers: null, ab_variant_a_trials: null,
-      ab_variant_b_viewers: null, ab_variant_b_trials: null, ab_test_significance: null,
-      us_trials: 0, gb_trials: 0, us_revenue_gbp: 0, gb_revenue_gbp: 0,
-      placement_breakdown: null, data_quality_checks: null, notes: null,
-    };
-
-    try {
-      const res = await fetch("/api/metrics", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(emptyRow),
-      });
-
-      if (res.ok) {
-        const newData = [emptyRow as unknown as DailyMetrics, ...data].sort(
-          (a, b) => b.date.localeCompare(a.date)
-        );
-        setData(newData);
-        setAddingRow(false);
-        setNewDate("");
-        setLastSaved(`Added row for ${newDate}`);
-        setTimeout(() => setLastSaved(null), 2000);
-      }
-    } catch (err) {
-      console.error("Add row error:", err);
-    }
-  }, [newDate, data]);
-
   // Group columns for header
   const groupSpans = GROUPS.map(group => ({
     group,
@@ -258,39 +202,13 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
                 {lastSaved}
               </span>
             )}
-            {addingRow ? (
-              <div className="flex items-center gap-2">
-                <input
-                  ref={dateInputRef}
-                  type="date"
-                  value={newDate}
-                  onChange={(e) => setNewDate(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleAddRow(); if (e.key === "Escape") setAddingRow(false); }}
-                  className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-amber-300"
-                />
-                <button
-                  onClick={handleAddRow}
-                  className="px-3 py-1.5 text-sm font-semibold text-white rounded-lg"
-                  style={{ background: "linear-gradient(135deg, #F59E0B, #F97316)" }}
-                >
-                  Add
-                </button>
-                <button
-                  onClick={() => setAddingRow(false)}
-                  className="px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-gray-700"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setAddingRow(true)}
-                className="px-4 py-2 text-sm font-semibold text-white rounded-xl"
-                style={{ background: "linear-gradient(135deg, #F59E0B, #F97316)" }}
-              >
-                + Add Day
-              </button>
-            )}
+            <a
+              href="/upload"
+              className="px-4 py-2 text-sm font-semibold text-white rounded-xl hover:shadow-lg transition-all"
+              style={{ background: "linear-gradient(135deg, #F59E0B, #F97316)" }}
+            >
+              Add Data
+            </a>
           </div>
         </div>
       </header>

@@ -88,7 +88,7 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
             <h1 className="text-xl font-bold text-gray-800">Growth Dashboard</h1>
             <p className="text-xs text-gray-400 font-medium">Last updated: {today.date}</p>
           </div>
-          <a href="/upload" className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white hover:shadow-lg transition-all" style={{ background: "linear-gradient(135deg, #F59E0B, #F97316)" }}>Refresh Data</a>
+
         </div>
       </header>
 
