@@ -381,6 +381,15 @@ export function computeMetrics(input: ComputeInput): Omit<DailyMetrics, "id" | "
     us_revenue_gbp: 0, // TODO: derive from conversions when market-level revenue is available
     gb_revenue_gbp: 0,
 
+    // Revenue segments (populated via /api/import/revenue CSV upload)
+    parent_revenue_gbp: 0,
+    teen_revenue_gbp: 0,
+    rev_parent_annual_gbp: 0,
+    rev_parent_monthly_gbp: 0,
+    rev_teen_annual_gbp: 0,
+    rev_teen_monthly_gbp: 0,
+    rev_teen_weekly_gbp: 0,
+
     // Detail
     placement_breakdown: placementBreakdown,
     data_quality_checks: qualityChecks,
