@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import {
   parseRevenueCSV,
+  parseRevenueByCountryCSV,
+  parseRevenueByPlansCSV,
   parseSubsCSV,
   parseConversionsCSV,
   parseScreenViewsCSV,
@@ -21,9 +23,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
     }
 
-    // First pass: read all file contents and detect the target date
+    // First pass: read all file contents
     let tiktokBuffer: ArrayBuffer | null = null;
-    let revenueText = "";
+    let revenueStoresText = "";
+    let revenueCountryText = "";
+    let revenuePlansText = "";
     let subsText = "";
     let conversionsText = "";
     let screenViewsText = "";
@@ -34,8 +38,12 @@ export async function POST(request: Request) {
 
       if (type === "tiktok") {
         tiktokBuffer = await file.arrayBuffer();
-      } else if (type === "revenue") {
-        revenueText = await file.text();
+      } else if (type === "revenue_stores" || type === "revenue") {
+        revenueStoresText = await file.text();
+      } else if (type === "revenue_country") {
+        revenueCountryText = await file.text();
+      } else if (type === "revenue_plans") {
+        revenuePlansText = await file.text();
       } else if (type === "subscriptions") {
         subsText = await file.text();
       } else if (type === "conversions") {
@@ -46,17 +54,17 @@ export async function POST(request: Request) {
     }
 
     // Determine target date:
-    // 1. Use explicit override if provided
+    // 1. Explicit override
     // 2. Detect from conversions CSV (most reliable — has exact dates)
-    // 3. Detect from revenue CSV
+    // 3. Detect from stores revenue CSV
     // 4. Fall back to today
     let detectedDate = dateOverride || "";
 
     if (!detectedDate && conversionsText) {
       detectedDate = detectLatestDate(conversionsText);
     }
-    if (!detectedDate && revenueText) {
-      detectedDate = detectLatestDate(revenueText);
+    if (!detectedDate && revenueStoresText) {
+      detectedDate = detectLatestDate(revenueStoresText);
     }
     if (!detectedDate) {
       detectedDate = new Date().toISOString().split("T")[0];
@@ -67,9 +75,17 @@ export async function POST(request: Request) {
       ? await parseTikTokXLSX(tiktokBuffer)
       : { installs: 0, spend: 0, impressions: 0, clicks: 0, cpm: 0 };
 
-    const revenueData = revenueText
-      ? parseRevenueCSV(revenueText, detectedDate)
+    const revenueData = revenueStoresText
+      ? parseRevenueCSV(revenueStoresText, detectedDate)
       : { apple: 0, google: 0 };
+
+    const revenueByCountry = revenueCountryText
+      ? parseRevenueByCountryCSV(revenueCountryText, detectedDate)
+      : undefined;
+
+    const revenueByPlans = revenuePlansText
+      ? parseRevenueByPlansCSV(revenuePlansText, detectedDate)
+      : undefined;
 
     const subsData = subsText
       ? parseSubsCSV(subsText, detectedDate)
@@ -107,9 +123,10 @@ export async function POST(request: Request) {
       conversions,
       screenViews,
       spendSevenDaysAgo,
+      revenueByCountry,
+      revenueByPlans,
     });
 
-    // Verify checksums before saving
     if (
       metrics.data_quality_checks &&
       !metrics.data_quality_checks.checksum_passed
@@ -117,26 +134,23 @@ export async function POST(request: Request) {
       console.warn("Data quality check failed:", metrics.data_quality_checks);
     }
 
-    // Delete existing row for this date, then insert fresh (guarantees override)
+    // Delete existing row for this date, then insert fresh
     await supabase
       .from("metrics")
       .delete()
       .eq("client_id", metrics.client_id)
       .eq("date", metrics.date);
 
-    const { error } = await supabase.from("metrics").insert(
-      {
-        ...metrics,
-        // Supabase expects JSON columns as objects
-        placement_breakdown: metrics.placement_breakdown as unknown,
-        data_quality_checks: metrics.data_quality_checks as unknown,
-        computed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-    );
+    const { error } = await supabase.from("metrics").insert({
+      ...metrics,
+      placement_breakdown: metrics.placement_breakdown as unknown,
+      data_quality_checks: metrics.data_quality_checks as unknown,
+      computed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
 
     if (error) {
-      console.error("Supabase upsert error:", error);
+      console.error("Supabase insert error:", error);
       return NextResponse.json(
         { error: `Database error: ${error.message}` },
         { status: 500 }

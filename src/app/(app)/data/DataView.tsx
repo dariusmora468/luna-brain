@@ -31,9 +31,19 @@ const COLUMNS: {
   { key: "new_subscriptions", label: "New Subs", group: "Subs", editable: true, format: "int", width: 80 },
   { key: "churn", label: "Churn", group: "Subs", editable: true, format: "int", width: 65 },
   // Revenue
-  { key: "total_revenue_gbp", label: "Revenue (£)", group: "Revenue", editable: true, format: "currency", width: 100 },
-  { key: "us_revenue_gbp", label: "US Rev", group: "Revenue", editable: true, format: "currency", width: 80 },
-  { key: "gb_revenue_gbp", label: "UK Rev", group: "Revenue", editable: true, format: "currency", width: 80 },
+  { key: "total_revenue_gbp", label: "Total (£)", group: "Revenue", editable: true, format: "currency", width: 85 },
+  { key: "apple_revenue_gbp", label: "Apple", group: "Revenue", editable: false, format: "currency", width: 75 },
+  { key: "google_revenue_gbp", label: "Google", group: "Revenue", editable: false, format: "currency", width: 75 },
+  { key: "us_revenue_gbp", label: "US", group: "Revenue", editable: false, format: "currency", width: 70 },
+  { key: "gb_revenue_gbp", label: "UK", group: "Revenue", editable: false, format: "currency", width: 70 },
+  // Revenue by plan
+  { key: "parent_revenue_gbp", label: "Parent", group: "Plan Rev", editable: false, format: "currency", width: 75 },
+  { key: "teen_revenue_gbp", label: "Teen", group: "Plan Rev", editable: false, format: "currency", width: 70 },
+  { key: "rev_parent_annual_gbp", label: "Par Annual", group: "Plan Rev", editable: false, format: "currency", width: 90 },
+  { key: "rev_parent_monthly_gbp", label: "Par Monthly", group: "Plan Rev", editable: false, format: "currency", width: 95 },
+  { key: "rev_teen_annual_gbp", label: "Teen Annual", group: "Plan Rev", editable: false, format: "currency", width: 95 },
+  { key: "rev_teen_monthly_gbp", label: "Teen Monthly", group: "Plan Rev", editable: false, format: "currency", width: 100 },
+  { key: "rev_teen_weekly_gbp", label: "Teen Weekly", group: "Plan Rev", editable: false, format: "currency", width: 100 },
   // Derived (auto-computed, not editable)
   { key: "cost_per_install_gbp", label: "CPI (£)", group: "Derived", editable: false, format: "currency", width: 75 },
   { key: "cost_per_trial_gbp", label: "CPT (£)", group: "Derived", editable: false, format: "currency", width: 75 },
@@ -42,7 +52,7 @@ const COLUMNS: {
   { key: "roas_7d", label: "ROAS", group: "Derived", editable: false, format: "decimal", width: 65 },
 ];
 
-const GROUPS = ["TikTok", "Trials", "Market", "Subs", "Revenue", "Derived"];
+const GROUPS = ["TikTok", "Trials", "Market", "Subs", "Revenue", "Plan Rev", "Derived"];
 
 const GROUP_COLORS: Record<string, string> = {
   TikTok: "#3B82F6",
@@ -50,6 +60,7 @@ const GROUP_COLORS: Record<string, string> = {
   Market: "#06B6D4",
   Subs: "#F59E0B",
   Revenue: "#10B981",
+  "Plan Rev": "#7C3AED",
   Derived: "#6B7280",
 };
 
