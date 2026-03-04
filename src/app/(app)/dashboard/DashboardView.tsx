@@ -6,7 +6,6 @@ import HeroMetric from "./components/HeroMetric";
 import TrendChart from "./components/TrendChart";
 import DayDetailPanel from "./components/DayDetailPanel";
 import InsightsPanel from "./components/InsightsPanel";
-import ABTestCard from "./components/ABTestCard";
 import SegmentedRevenueChart from "./components/SegmentedRevenueChart";
 
 interface Activity {
@@ -132,9 +131,6 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
 
         {/* AI INSIGHTS */}
         <InsightsPanel today={today} yesterday={yesterday} history={history} />
-
-        {/* A/B TEST */}
-        <ABTestCard today={today} />
 
         {/* Debug info at bottom */}
         {debugInfo && (
