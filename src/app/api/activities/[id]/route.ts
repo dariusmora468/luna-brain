@@ -4,10 +4,11 @@ import { NextRequest, NextResponse } from "next/server";
 // DELETE /api/activities/[id] — delete a single activity by id
 export async function DELETE(
   _request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = createServerClient();
-  const id = parseInt(params.id, 10);
+  const { id: idStr } = await params;
+  const id = parseInt(idStr, 10);
 
   if (isNaN(id)) {
     return NextResponse.json({ error: "Invalid activity id" }, { status: 400 });
