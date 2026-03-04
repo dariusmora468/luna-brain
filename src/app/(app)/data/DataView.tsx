@@ -69,6 +69,40 @@ const GROUP_COLORS: Record<string, string> = {
   Derived: "#6B7280",
 };
 
+// ---- Source URL builders (mirrors upload/page.tsx) ----
+function buildTikTokUrl(date: string) {
+  return `https://ads.tiktok.com/i18n/manage/campaign?aadvid=7279002125701595138&sort_state=ctr&sort_order=1&relative_time=1&filters%5B0%5D%5Bfield%5D=campaign_status&filters%5B0%5D%5Bin_field_values%5D%5B0%5D=delivery_ok&filters%5B0%5D%5Bfilter_type%5D=0&st=${date}&et=${date}`;
+}
+function buildPurchaselySubsUrl(date: string) {
+  const dr = encodeURIComponent(`${date}T00:00:00.000Z,${date}T00:00:00.000Z`);
+  return `https://console.purchasely.io/app_LqxssVldDI20rClHxeoFUTvC6yoPOr/dashboards/subscriptions?date_range%5B%5D=${dr}&primary_metric=paywalls_viewed&secondary_metric=conversions_to_regular_ratio&group_by_primary=none&group_by_secondary=none&primary_metric_sub_evolution=all&group_by_primary_sub_evolution=none&offer_types%5B%5D=NONE%2CINTRO_OFFER%2CPROMOTIONAL_OFFER%2CPROMO_CODE`;
+}
+function buildPurchaselyConvUrl(date: string) {
+  const dr = encodeURIComponent(`${date}T00:00:00.000Z,${date}T00:00:00.000Z`);
+  return `https://console.purchasely.io/app_LqxssVldDI20rClHxeoFUTvC6yoPOr/dashboards/conversion?date_range%5B%5D=${dr}&primary_metric=unique_viewers&secondary_metric=conversions_to_offer_count&group_by_primary=none&group_by_secondary=country&primary_metric_sub_evolution=all&group_by_primary_sub_evolution=none&placements%5B%5D=plac_gvXbX7H4ZXWZCiUiy4nCnr44JOsYIdS1%2Cplac_CuGQ9FOmG0LZuRwlRqslqLZiANlQZVMd%2Cplac_z2g1ZzLErwl7vgeVTawyBhE6kblC0Gk%2Cplac_IimeiB5pmR4LAAnAxYO1ONIsIVtws%2Cplac_kLsaF2kQCFt6cLmAEqaSgaHdeaBAcI%2Cplac_8R2GVz5FglxSHOH683EHdWmPwRQhQGd%2Cplac_gYqfthRUjcI8u1qANae5qiIgqZpl0I%2Cplac_LpfgptgxTvvLwlpFxvcpYf9joLFFcG6e%2Cplac_HcV6MfgC7Up53f51lyYbRBXQPEO7Kc%2Cplac_19ZBIgn3SPdaZElCnO02jMrRh3z9gi6I%2Cplac_vdP2WpEXVkUrUdkPZqkBhJp1SnAlr9e%2Cplac_CE8SN0x4K91nSkuOI0AGLuAVMW8hvfBl%2Cplac_tN4AlcKDMQpQROy4B3hoK8SxZzg4Pct%2Cplac_CaP0Aep3nhqE8O1O2sEp2X73At2P2zPW%2Cplac_PMa3jMkW8dkYMO5kTbtiCGmgp1MFkBI%2Cplac_crRzibqkyebdUJfeeUjoUtERuhRrb%2Cplac_1MPUQhYp4pwMuV92wPAgOL7aUwGU9X%2Cplac_aV17R1BdqUi06q2744fi9xFqmzkl3FfI%2Cplac_IWzW3Z1dPaaMdtBv1QP3cJZiGQyFVdLo&countries%5B%5D=US%2CGB`;
+}
+
+// Maps each column group to its data source URL builder (null = derived/computed)
+const GROUP_SOURCE_BUILDERS: Record<string, ((date: string) => string) | null> = {
+  TikTok: buildTikTokUrl,
+  Trials: buildPurchaselyConvUrl,
+  Market: buildPurchaselyConvUrl,
+  Subs: buildPurchaselySubsUrl,
+  Revenue: buildPurchaselySubsUrl,
+  "Plan Rev": buildPurchaselySubsUrl,
+  Derived: null,
+};
+
+const GROUP_SOURCE_LABELS: Record<string, string> = {
+  TikTok: "TikTok Ads",
+  Trials: "Purchasely Conversions",
+  Market: "Purchasely Conversions",
+  Subs: "Purchasely Subscriptions",
+  Revenue: "Purchasely Subscriptions",
+  "Plan Rev": "Purchasely Subscriptions",
+  Derived: "Computed",
+};
+
 function formatValue(val: number | null | undefined, format: string): string {
   if (val === null || val === undefined) return "—";
   switch (format) {
@@ -212,6 +246,9 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
     }
   }, [editing, handleSave, handleCellClick, data]);
 
+  // Most recent date in data — used for source links so they open on the latest loaded date
+  const latestDate = data.length > 0 ? data[data.length - 1].date : new Date().toISOString().slice(0, 10);
+
   // Group columns for header
   const groupSpans = GROUPS.map(group => ({
     group,
@@ -269,16 +306,35 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
                     className="sticky left-0 z-20 bg-white px-4 py-2 text-left text-xs font-semibold text-gray-400 border-b border-gray-100"
                     style={{ width: 100, minWidth: 100 }}
                   />
-                  {groupSpans.map(({ group, count }) => (
-                    <th
-                      key={group}
-                      colSpan={count}
-                      className="px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wider border-b border-gray-100"
-                      style={{ color: GROUP_COLORS[group] }}
-                    >
-                      {group}
-                    </th>
-                  ))}
+                  {groupSpans.map(({ group, count }) => {
+                    const urlBuilder = GROUP_SOURCE_BUILDERS[group];
+                    const sourceUrl = urlBuilder ? urlBuilder(latestDate) : null;
+                    return (
+                      <th
+                        key={group}
+                        colSpan={count}
+                        className="px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wider border-b border-gray-100"
+                        style={{ color: GROUP_COLORS[group] }}
+                      >
+                        {sourceUrl ? (
+                          <a
+                            href={sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Open ${GROUP_SOURCE_LABELS[group]}`}
+                            className="inline-flex items-center gap-0.5 hover:opacity-60 transition-opacity"
+                          >
+                            {group}
+                            <svg className="w-2.5 h-2.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                            </svg>
+                          </a>
+                        ) : (
+                          group
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
                 {/* Column header */}
                 <tr>
@@ -288,15 +344,31 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
                   >
                     Date
                   </th>
-                  {COLUMNS.map((col) => (
-                    <th
-                      key={col.key}
-                      className={`px-2 py-2.5 text-right text-xs font-semibold border-b border-gray-200 ${col.editable ? "text-gray-600" : "text-gray-400"}`}
-                      style={{ width: col.width, minWidth: col.width }}
-                    >
-                      {col.label}
-                    </th>
-                  ))}
+                  {COLUMNS.map((col) => {
+                    const urlBuilder = GROUP_SOURCE_BUILDERS[col.group];
+                    const sourceUrl = urlBuilder ? urlBuilder(latestDate) : null;
+                    return (
+                      <th
+                        key={col.key}
+                        className={`px-2 py-2.5 text-right text-xs font-semibold border-b border-gray-200 ${col.editable ? "text-gray-600" : "text-gray-400"}`}
+                        style={{ width: col.width, minWidth: col.width }}
+                      >
+                        {sourceUrl ? (
+                          <a
+                            href={sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={`Source: ${GROUP_SOURCE_LABELS[col.group]}`}
+                            className="hover:underline hover:opacity-60 transition-opacity"
+                          >
+                            {col.label}
+                          </a>
+                        ) : (
+                          col.label
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
 
