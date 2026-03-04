@@ -54,6 +54,13 @@ export interface DailyMetrics {
   gb_trials: number;
   us_revenue_gbp: number;
   gb_revenue_gbp: number;
+  au_revenue_gbp: number;
+  nl_revenue_gbp: number;
+  se_revenue_gbp: number;
+
+  // Trials by audience
+  parent_trials: number | null;
+  teen_trials: number | null;
 
   // Revenue by audience
   parent_revenue_gbp: number;

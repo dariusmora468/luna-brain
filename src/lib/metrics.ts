@@ -59,7 +59,7 @@ export function parseRevenueCSV(csvText: string, targetDate?: string): RevenueRa
   return { apple, google };
 }
 
-export function parseRevenueByCountryCSV(csvText: string, targetDate?: string): { us: number; gb: number } {
+export function parseRevenueByCountryCSV(csvText: string, targetDate?: string): { us: number; gb: number; au: number; nl: number; se: number } {
   const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
   const rows = parsed.data as Record<string, string>[];
 
@@ -68,11 +68,14 @@ export function parseRevenueByCountryCSV(csvText: string, targetDate?: string): 
     targetRow = rows.find((r) => (r["Period"] || "").substring(0, 10) === targetDate);
   }
   if (!targetRow) targetRow = rows[rows.length - 1];
-  if (!targetRow) return { us: 0, gb: 0 };
+  if (!targetRow) return { us: 0, gb: 0, au: 0, nl: 0, se: 0 };
 
   const gb = parseFloat(targetRow["United Kingdom"] || "0");
   const us = parseFloat(targetRow["United States"] || "0");
-  return { us, gb };
+  const au = parseFloat(targetRow["Australia"] || "0");
+  const nl = parseFloat(targetRow["Netherlands"] || "0");
+  const se = parseFloat(targetRow["Sweden"] || "0");
+  return { us, gb, au, nl, se };
 }
 
 export function parseRevenueByPlansCSV(csvText: string, targetDate?: string): {
@@ -243,7 +246,7 @@ interface ComputeInput {
   // For 7-day lag metrics
   spendSevenDaysAgo?: number | null;
   // Revenue segments (from revenues-by-country.csv and revenues-by-plans.csv)
-  revenueByCountry?: { us: number; gb: number };
+  revenueByCountry?: { us: number; gb: number; au: number; nl: number; se: number };
   revenueByPlans?: { parent_annual: number; parent_monthly: number; teen_annual: number; teen_monthly: number; teen_weekly: number };
 }
 
@@ -290,6 +293,21 @@ export function computeMetrics(input: ComputeInput): Omit<DailyMetrics, "id" | "
     .reduce((sum, c) => sum + c.conversions_to_offer_price + c.conversions_to_regular_price, 0);
   const gbTrials = conversions
     .filter((c) => c.country === "GB")
+    .reduce((sum, c) => sum + c.conversions_to_offer_price + c.conversions_to_regular_price, 0);
+
+  // ---- Audience breakdown (parent vs teen) ----
+  // Parent = presentation or plan contains "parent"
+  const parentTrials = conversions
+    .filter((c) =>
+      c.presentation_id?.toLowerCase().includes("parent") ||
+      c.plan_id?.toLowerCase().includes("parent")
+    )
+    .reduce((sum, c) => sum + c.conversions_to_offer_price + c.conversions_to_regular_price, 0);
+  const teenTrials = conversions
+    .filter((c) =>
+      !c.presentation_id?.toLowerCase().includes("parent") &&
+      !c.plan_id?.toLowerCase().includes("parent")
+    )
     .reduce((sum, c) => sum + c.conversions_to_offer_price + c.conversions_to_regular_price, 0);
 
   // ---- Revenue ----
@@ -436,6 +454,13 @@ export function computeMetrics(input: ComputeInput): Omit<DailyMetrics, "id" | "
     gb_trials: gbTrials,
     us_revenue_gbp: revenueByCountry?.us ?? 0,
     gb_revenue_gbp: revenueByCountry?.gb ?? 0,
+    au_revenue_gbp: revenueByCountry?.au ?? 0,
+    nl_revenue_gbp: revenueByCountry?.nl ?? 0,
+    se_revenue_gbp: revenueByCountry?.se ?? 0,
+
+    // Audience trials
+    parent_trials: parentTrials,
+    teen_trials: teenTrials,
 
     // Revenue segments (populated from revenues-by-plans.csv)
     parent_revenue_gbp: revenueByPlans ? revenueByPlans.parent_annual + revenueByPlans.parent_monthly : 0,

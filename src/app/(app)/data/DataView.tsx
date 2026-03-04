@@ -24,6 +24,9 @@ const COLUMNS: {
   { key: "monthly_trials", label: "Monthly", group: "Trials", editable: true, format: "int", width: 75 },
   { key: "annual_full_trials", label: "Annual", group: "Trials", editable: true, format: "int", width: 70 },
   { key: "annual_discount_trials", label: "Disc.", group: "Trials", editable: true, format: "int", width: 60 },
+  // Trials by audience
+  { key: "parent_trials", label: "Parent", group: "Trials", editable: false, format: "int", width: 65 },
+  { key: "teen_trials", label: "Teen", group: "Trials", editable: false, format: "int", width: 60 },
   // Market
   { key: "us_trials", label: "US", group: "Market", editable: true, format: "int", width: 55 },
   { key: "gb_trials", label: "UK", group: "Market", editable: true, format: "int", width: 55 },
@@ -34,8 +37,10 @@ const COLUMNS: {
   { key: "total_revenue_gbp", label: "Total (£)", group: "Revenue", editable: true, format: "currency", width: 85 },
   { key: "apple_revenue_gbp", label: "Apple", group: "Revenue", editable: false, format: "currency", width: 75 },
   { key: "google_revenue_gbp", label: "Google", group: "Revenue", editable: false, format: "currency", width: 75 },
-  { key: "us_revenue_gbp", label: "US", group: "Revenue", editable: false, format: "currency", width: 70 },
   { key: "gb_revenue_gbp", label: "UK", group: "Revenue", editable: false, format: "currency", width: 70 },
+  { key: "au_revenue_gbp", label: "AU", group: "Revenue", editable: false, format: "currency", width: 70 },
+  { key: "nl_revenue_gbp", label: "NL", group: "Revenue", editable: false, format: "currency", width: 70 },
+  { key: "se_revenue_gbp", label: "SE", group: "Revenue", editable: false, format: "currency", width: 70 },
   // Revenue by plan
   { key: "parent_revenue_gbp", label: "Parent", group: "Plan Rev", editable: false, format: "currency", width: 75 },
   { key: "teen_revenue_gbp", label: "Teen", group: "Plan Rev", editable: false, format: "currency", width: 70 },
