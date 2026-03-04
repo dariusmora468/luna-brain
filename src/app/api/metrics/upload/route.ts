@@ -73,7 +73,7 @@ export async function POST(request: Request) {
     // Second pass: parse each file using the target date
     const tiktokData = tiktokBuffer
       ? await parseTikTokXLSX(tiktokBuffer)
-      : { installs: 0, spend: 0, impressions: 0, clicks: 0, cpm: 0 };
+      : { installs: 0, spend: 0, impressions: 0, clicks: 0, cpm: 0, parentInstalls: 0, parentSpend: 0, teenInstalls: 0, teenSpend: 0 };
 
     const revenueData = revenueStoresText
       ? parseRevenueCSV(revenueStoresText, detectedDate)

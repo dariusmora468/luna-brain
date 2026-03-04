@@ -17,6 +17,10 @@ const COLUMNS: {
   { key: "tiktok_installs", label: "Installs", group: "TikTok", editable: true, format: "int", width: 80 },
   { key: "tiktok_impressions", label: "Impr.", group: "TikTok", editable: true, format: "int", width: 80 },
   { key: "tiktok_clicks", label: "Clicks", group: "TikTok", editable: true, format: "int", width: 70 },
+  { key: "parent_spend_gbp", label: "Par Spend", group: "TikTok", editable: false, format: "currency", width: 85 },
+  { key: "teen_spend_gbp", label: "Teen Spend", group: "TikTok", editable: false, format: "currency", width: 85 },
+  { key: "parent_installs", label: "Par Inst", group: "TikTok", editable: false, format: "int", width: 75 },
+  { key: "teen_installs", label: "Teen Inst", group: "TikTok", editable: false, format: "int", width: 75 },
   // Trials
   { key: "total_trials", label: "Trials", group: "Trials", editable: true, format: "int", width: 70 },
   { key: "onboarding_trials", label: "Onboard.", group: "Trials", editable: true, format: "int", width: 80 },

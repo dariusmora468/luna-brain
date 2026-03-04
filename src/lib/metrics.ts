@@ -217,21 +217,40 @@ export async function parseTikTokXLSX(buffer: ArrayBuffer): Promise<TikTokRawDat
   let impressions = 0;
   let clicks = 0;
 
+  // Segment split: campaigns containing "teens" → teen, "parents" → parent
+  let parentInstalls = 0;
+  let parentSpend = 0;
+  let teenInstalls = 0;
+  let teenSpend = 0;
+
   for (const row of rows) {
     // Skip TikTok's summary/totals rows (e.g. "Total of X results")
     const campaignName = String(row["Campaign name"] || row["Campaign Name"] || "");
     if (campaignName.toLowerCase().startsWith("total")) continue;
-    
+
     // TikTok columns may vary — handle common variations
-    installs += Number(row["Result"] || row["Conversions"] || row["Install"] || 0);
-    spend += Number(row["Cost"] || row["Spend"] || row["Total Cost"] || 0);
+    const rowInstalls = Number(row["Result"] || row["Conversions"] || row["Install"] || 0);
+    const rowSpend   = Number(row["Cost"] || row["Spend"] || row["Total Cost"] || 0);
+    installs   += rowInstalls;
+    spend      += rowSpend;
     impressions += Number(row["Impressions"] || row["Impression"] || 0);
-    clicks += Number(row["Clicks"] || row["Clicks (destination)"] || row["Click"] || 0);
+    clicks     += Number(row["Clicks"] || row["Clicks (destination)"] || row["Click"] || 0);
+
+    // Segment attribution by campaign name keyword
+    const nameLower = campaignName.toLowerCase();
+    if (nameLower.includes("teens")) {
+      teenInstalls += rowInstalls;
+      teenSpend    += rowSpend;
+    } else {
+      // Campaigns containing "parents" or any unrecognised campaign → parent
+      parentInstalls += rowInstalls;
+      parentSpend    += rowSpend;
+    }
   }
 
   const cpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
 
-  return { installs, spend, impressions, clicks, cpm };
+  return { installs, spend, impressions, clicks, cpm, parentInstalls, parentSpend, teenInstalls, teenSpend };
 }
 
 // ---- Core Metric Computation ----
@@ -461,6 +480,12 @@ export function computeMetrics(input: ComputeInput): Omit<DailyMetrics, "id" | "
     // Audience trials
     parent_trials: parentTrials,
     teen_trials: teenTrials,
+
+    // TikTok spend & installs by segment
+    parent_spend_gbp: tiktok.parentSpend,
+    teen_spend_gbp: tiktok.teenSpend,
+    parent_installs: tiktok.parentInstalls,
+    teen_installs: tiktok.teenInstalls,
 
     // Revenue segments (populated from revenues-by-plans.csv)
     parent_revenue_gbp: revenueByPlans ? revenueByPlans.parent_annual + revenueByPlans.parent_monthly : 0,

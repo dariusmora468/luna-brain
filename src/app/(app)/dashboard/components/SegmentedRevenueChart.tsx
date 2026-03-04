@@ -44,6 +44,8 @@ interface Props {
   data: DailyMetrics[];
   onDayClick: (date: string) => void;
   selectedDate: string | null;
+  /** When set to "parents" or "teens", hides the Audience sub-toggle (data is already segment-filtered) */
+  dashboardSegment?: "all" | "parents" | "teens";
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -74,8 +76,14 @@ function CustomTooltip({ active, payload, label }: any) {
   );
 }
 
-export default function SegmentedRevenueChart({ data, onDayClick, selectedDate }: Props) {
+export default function SegmentedRevenueChart({ data, onDayClick, selectedDate, dashboardSegment = "all" }: Props) {
   const [segment, setSegment] = useState<Segment>("total");
+
+  // When the dashboard segment changes, reset revenue sub-toggle to "total"
+  // (avoid staying on "audience" which would be wrong in segmented view)
+  const visibleSegments = dashboardSegment === "all"
+    ? SEGMENTS
+    : SEGMENTS.filter((s) => s.value !== "audience");
 
   const series = SEGMENT_SERIES[segment];
 
@@ -107,7 +115,7 @@ export default function SegmentedRevenueChart({ data, onDayClick, selectedDate }
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-semibold text-gray-700">Revenue</h3>
         <div className="flex gap-0.5 bg-gray-100 rounded-lg p-0.5">
-          {SEGMENTS.map((s) => (
+          {visibleSegments.map((s) => (
             <button
               key={s.value}
               onClick={() => setSegment(s.value)}
