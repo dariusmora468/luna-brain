@@ -11,6 +11,10 @@ const COLUMNS: {
   editable: boolean;
   format: "int" | "currency" | "percent" | "decimal";
   width: number;
+  /** Client-side derived value — overrides row[key] lookup */
+  compute?: (row: DailyMetrics) => number | null;
+  /** True = this cell shows a hardcoded assumption, styled in amber */
+  isAssumption?: boolean;
 }[] = [
   // TikTok
   { key: "tiktok_spend_gbp", label: "Spend (£)", group: "TikTok", editable: true, format: "currency", width: 90 },
@@ -59,9 +63,47 @@ const COLUMNS: {
   { key: "cost_per_subscriber_gbp", label: "CPS (£)", group: "Derived", editable: false, format: "currency", width: 75 },
   { key: "install_to_trial_cr", label: "I→T %", group: "Derived", editable: false, format: "percent", width: 70 },
   { key: "roas_7d", label: "ROAS", group: "Derived", editable: false, format: "decimal", width: 65 },
+  // LTV Projection
+  // Formula: LTV@D30 = ARPU × 50%  (50% of trial starters convert by Day 30)
+  //          LTV@D365 = LTV@D30 × (1 + 40%)  (40% of D30 converts renew, adding another round)
+  {
+    key: "ltv_arpu", label: "ARPU", group: "LTV", editable: false, format: "currency", width: 75,
+    compute: (r) => r.new_subscriptions > 0
+      ? Math.round(r.total_revenue_gbp / r.new_subscriptions * 100) / 100
+      : null,
+  },
+  {
+    key: "ltv_trial_conv", label: "Trial→Paid%", group: "LTV", editable: false, format: "percent", width: 90,
+    compute: (r) => r.total_trials > 0
+      ? Math.round(r.new_subscriptions / r.total_trials * 10000) / 100
+      : null,
+  },
+  {
+    key: "ltv_d30_rate", label: "D30 Conv%", group: "LTV", editable: false, format: "percent", width: 85,
+    compute: () => 50,
+    isAssumption: true,
+  },
+  {
+    key: "ltv_d30", label: "LTV@D30", group: "LTV", editable: false, format: "currency", width: 80,
+    compute: (r) => r.new_subscriptions > 0
+      ? Math.round(r.total_revenue_gbp / r.new_subscriptions * 0.50 * 100) / 100
+      : null,
+  },
+  {
+    key: "ltv_d365_rate", label: "D365 Ret%", group: "LTV", editable: false, format: "percent", width: 85,
+    compute: () => 40,
+    isAssumption: true,
+  },
+  {
+    key: "ltv_d365", label: "LTV@D365", group: "LTV", editable: false, format: "currency", width: 85,
+    compute: (r) => r.new_subscriptions > 0
+      // D30 converters + 40% of them renewing = ARPU × 50% × (1 + 40%) = ARPU × 70%
+      ? Math.round(r.total_revenue_gbp / r.new_subscriptions * 0.70 * 100) / 100
+      : null,
+  },
 ];
 
-const GROUPS = ["TikTok", "Trials", "Market", "Subs", "Revenue", "Plan Rev", "Derived"];
+const GROUPS = ["TikTok", "Trials", "Market", "Subs", "Revenue", "Plan Rev", "Derived", "LTV"];
 
 const GROUP_COLORS: Record<string, string> = {
   TikTok: "#3B82F6",
@@ -71,6 +113,7 @@ const GROUP_COLORS: Record<string, string> = {
   Revenue: "#10B981",
   "Plan Rev": "#7C3AED",
   Derived: "#6B7280",
+  LTV: "#EC4899",
 };
 
 // ---- Source URL builders (mirrors upload/page.tsx) ----
@@ -95,6 +138,7 @@ const GROUP_SOURCE_BUILDERS: Record<string, ((date: string) => string) | null> =
   Revenue: buildPurchaselySubsUrl,
   "Plan Rev": buildPurchaselySubsUrl,
   Derived: null,
+  LTV: null,
 };
 
 const GROUP_SOURCE_LABELS: Record<string, string> = {
@@ -105,6 +149,7 @@ const GROUP_SOURCE_LABELS: Record<string, string> = {
   Revenue: "Purchasely Subscriptions",
   "Plan Rev": "Purchasely Subscriptions",
   Derived: "Computed",
+  LTV: "Computed",
 };
 
 function formatValue(val: number | null | undefined, format: string): string {
@@ -140,11 +185,16 @@ interface EditingCell {
 function exportCSV(data: DailyMetrics[]) {
   const headers = ["date", ...COLUMNS.map(c => c.key)];
   const rows = data.map(row => {
-    return headers.map(h => {
-      const val = h === "date" ? row.date : (row as unknown as Record<string, number | null>)[h];
-      if (val === null || val === undefined) return "";
-      return String(val);
-    }).join(",");
+    return [
+      row.date,
+      ...COLUMNS.map(c => {
+        const val = c.compute
+          ? c.compute(row)
+          : (row as unknown as Record<string, number | null>)[c.key];
+        if (val === null || val === undefined) return "";
+        return String(val);
+      }),
+    ].join(",");
   });
   const csv = [headers.join(","), ...rows].join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -408,7 +458,9 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
 
                       {/* Data cells */}
                       {COLUMNS.map((col) => {
-                        const value = (row as unknown as Record<string, number | null>)[col.key] ?? null;
+                        const value = col.compute
+                          ? col.compute(row)
+                          : (row as unknown as Record<string, number | null>)[col.key] ?? null;
                         const isEditing = editing?.date === row.date && editing?.key === col.key;
                         const isEmpty = value === null || value === undefined || value === 0;
                         const isGroupBorder = COLUMNS.indexOf(col) > 0 && COLUMNS[COLUMNS.indexOf(col) - 1]?.group !== col.group;
@@ -432,6 +484,10 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
                                 className="w-full px-1.5 py-0.5 text-right text-xs font-mono rounded border-2 border-amber-400 focus:outline-none bg-white"
                                 style={{ minWidth: 40 }}
                               />
+                            ) : col.isAssumption ? (
+                              <span className="text-xs font-mono font-semibold" style={{ color: "#F59E0B" }}>
+                                {formatValue(value, col.format)}
+                              </span>
                             ) : (
                               <span className={`text-xs font-mono ${
                                 !col.editable ? "text-gray-400 italic" :
@@ -461,7 +517,13 @@ export default function DataView({ initialData }: { initialData: DailyMetrics[] 
             <span className="italic text-gray-400">Italic</span>
             = auto-computed (not editable)
           </span>
-          <span>Tab to move between cells. Enter to save. Esc to cancel.</span>
+          <span className="flex items-center gap-1.5">
+            <span className="font-semibold" style={{ color: "#F59E0B" }}>50%</span>
+            = hardcoded assumption (LTV projection)
+          </span>
+          <span className="text-gray-300">·</span>
+          <span className="text-gray-400">LTV formula: ARPU × D30Conv% × (1 + D365Ret%) · e.g. ARPU × 50% = LTV@D30 · × 70% = LTV@D365</span>
+          <span className="text-gray-300 ml-auto">Tab to move between cells · Enter to save · Esc to cancel.</span>
         </div>
       </div>
     </div>
