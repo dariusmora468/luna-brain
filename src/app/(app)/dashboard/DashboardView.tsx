@@ -72,16 +72,44 @@ function getSegmentView(m: DailyMetrics, seg: "parents" | "teens"): DailyMetrics
   };
 }
 
+type GeoSegment = "all" | "us" | "uk";
+
+const GEO_CONFIG: Record<GeoSegment, {
+  label: string; flag: string;
+  activeStyle: React.CSSProperties;
+}> = {
+  all: { label: "All", flag: "🌍", activeStyle: { background: "linear-gradient(135deg, #6B7280, #4B5563)" } },
+  us:  { label: "US",  flag: "🇺🇸", activeStyle: { background: "linear-gradient(135deg, #3B82F6, #1D4ED8)" } },
+  uk:  { label: "UK",  flag: "🇬🇧", activeStyle: { background: "linear-gradient(135deg, #EF4444, #B91C1C)" } },
+};
+
+/** Filters trials and revenue to a specific country, keeps spend/installs as-is (no geo split for TikTok) */
+function getGeoView(m: DailyMetrics, geo: "us" | "uk"): DailyMetrics {
+  const trials  = geo === "us" ? m.us_trials        : m.gb_trials;
+  const revenue = geo === "us" ? m.us_revenue_gbp   : m.gb_revenue_gbp;
+  const cpt = trials > 0 && m.tiktok_spend_gbp > 0 ? Math.round(m.tiktok_spend_gbp / trials * 100) / 100 : null;
+  return {
+    ...m,
+    total_trials:           trials,
+    onboarding_trials:      0,
+    non_onboarding_trials:  trials,
+    total_revenue_gbp:      revenue,
+    cost_per_trial_gbp:     cpt,
+    cost_per_subscriber_gbp: null, // no geo split for subscribers
+  };
+}
+
 export default function DashboardView({ today: rawToday, yesterday: rawYesterday, history: rawHistory, activities, debugInfo }: Props) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<"7d" | "30d" | "all">("7d");
   const [segment, setSegment] = useState<DashboardSegment>("all");
+  const [geoSegment, setGeoSegment] = useState<GeoSegment>("all");
 
   const history = useMemo(() => rawHistory.map(enrichMetrics), [rawHistory]);
   const today = rawToday ? enrichMetrics(rawToday) : null;
   const yesterday = rawYesterday ? enrichMetrics(rawYesterday) : null;
 
-  // Apply segment transformation so all existing charts/cards work unchanged
+  // Apply audience segment transformation
   const segmentedHistory = useMemo(
     () => segment === "all" ? history : history.map(m => getSegmentView(m, segment)),
     [history, segment]
@@ -89,20 +117,29 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
   const segmentedToday     = today     && segment !== "all" ? getSegmentView(today,     segment) : today;
   const segmentedYesterday = yesterday && segment !== "all" ? getSegmentView(yesterday, segment) : yesterday;
 
-  const filteredHistory = timeRange === "all" ? segmentedHistory : timeRange === "30d" ? segmentedHistory.slice(-30) : segmentedHistory.slice(-7);
-  const selectedMetrics = selectedDate ? segmentedHistory.find((m) => m.date === selectedDate) ?? null : null;
+  // Apply geo filter on top of audience-segmented data
+  const geoHistory = useMemo(
+    () => geoSegment === "all" ? segmentedHistory : segmentedHistory.map(m => getGeoView(m, geoSegment)),
+    [segmentedHistory, geoSegment]
+  );
+  const geoToday     = segmentedToday     && geoSegment !== "all" ? getGeoView(segmentedToday,     geoSegment) : segmentedToday;
+  const geoYesterday = segmentedYesterday && geoSegment !== "all" ? getGeoView(segmentedYesterday, geoSegment) : segmentedYesterday;
+
+  const filteredHistory = timeRange === "all" ? geoHistory : timeRange === "30d" ? geoHistory.slice(-30) : geoHistory.slice(-7);
+  const selectedMetrics = selectedDate ? geoHistory.find((m) => m.date === selectedDate) ?? null : null;
   const selectedActivities = selectedDate ? activities.filter((a) => a.date === selectedDate) : [];
 
-  // 7-day trailing averages for hero cards (use segmented data)
-  const last7 = segmentedHistory.slice(-7);
+  // 7-day trailing averages for hero cards (use fully-filtered data)
+  const last7 = geoHistory.slice(-7);
   function avg7(key: keyof DailyMetrics): number | null {
     const vals = last7.map((m) => m[key]).filter((v): v is number => v !== null && v !== undefined && typeof v === "number");
     if (vals.length === 0) return null;
     return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100;
   }
 
-  // Segment-aware label suffix for chart titles
+  // Label suffixes for chart titles
   const segLabel = segment === "parents" ? " · Parents" : segment === "teens" ? " · Teens" : "";
+  const geoLabel = geoSegment === "us" ? " · US" : geoSegment === "uk" ? " · UK" : "";
   const cfg = SEGMENT_CONFIG[segment];
 
   function handleChartClick(date: string) {
@@ -133,24 +170,47 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
             <p className="text-xs text-gray-400 font-medium">Last updated: {today.date}</p>
           </div>
 
-          {/* SEGMENT TOGGLE */}
-          <div className="flex gap-1 bg-white rounded-xl p-1" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-            {(["all", "parents", "teens"] as DashboardSegment[]).map((seg) => {
-              const c = SEGMENT_CONFIG[seg];
-              return (
-                <button
-                  key={seg}
-                  onClick={() => setSegment(seg)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                    segment === seg ? "text-white shadow-sm" : "text-gray-400 hover:text-gray-700"
-                  }`}
-                  style={segment === seg ? c.activeStyle : undefined}
-                >
-                  <span>{c.emoji}</span>
-                  <span>{c.label}</span>
-                </button>
-              );
-            })}
+          {/* FILTER TOGGLES */}
+          <div className="flex items-center gap-2">
+            {/* GEO TOGGLE */}
+            <div className="flex gap-1 bg-white rounded-xl p-1" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+              {(["all", "us", "uk"] as GeoSegment[]).map((geo) => {
+                const g = GEO_CONFIG[geo];
+                return (
+                  <button
+                    key={geo}
+                    onClick={() => setGeoSegment(geo)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 ${
+                      geoSegment === geo ? "text-white shadow-sm" : "text-gray-400 hover:text-gray-700"
+                    }`}
+                    style={geoSegment === geo ? g.activeStyle : undefined}
+                  >
+                    <span>{g.flag}</span>
+                    <span>{g.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* AUDIENCE TOGGLE */}
+            <div className="flex gap-1 bg-white rounded-xl p-1" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+              {(["all", "parents", "teens"] as DashboardSegment[]).map((seg) => {
+                const c = SEGMENT_CONFIG[seg];
+                return (
+                  <button
+                    key={seg}
+                    onClick={() => setSegment(seg)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                      segment === seg ? "text-white shadow-sm" : "text-gray-400 hover:text-gray-700"
+                    }`}
+                    style={segment === seg ? c.activeStyle : undefined}
+                  >
+                    <span>{c.emoji}</span>
+                    <span>{c.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </header>
@@ -158,11 +218,11 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
       <div className="p-6 space-y-6">
         {/* HERO METRICS */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <HeroMetric label={`Cost Per Install${segLabel}`} avgValue={avg7("cost_per_install_gbp")} yesterdayValue={segmentedYesterday?.cost_per_install_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / total installs" sparklineData={last7.map((m) => m.cost_per_install_gbp ?? 0)} gradient="linear-gradient(135deg, #F59E0B, #F97316)" />
-          <HeroMetric label={`Cost Per Trial${segLabel}`} avgValue={avg7("cost_per_trial_gbp")} yesterdayValue={segmentedYesterday?.cost_per_trial_gbp ?? null} format="currency" invertColors tooltip="TikTok spend ÷ all trials (incl. organic — blended avg)" sparklineData={last7.map((m) => m.cost_per_trial_gbp ?? 0)} gradient="linear-gradient(135deg, #10B981, #059669)" />
-          {segment === "all"
-            ? <HeroMetric label="Cost Per Subscriber" avgValue={avg7("cost_per_subscriber_gbp")} yesterdayValue={segmentedYesterday?.cost_per_subscriber_gbp ?? null} format="currency" invertColors tooltip="TikTok spend ÷ all new subscribers (incl. organic — blended avg)" sparklineData={last7.map((m) => m.cost_per_subscriber_gbp ?? 0)} gradient="linear-gradient(135deg, #8B5CF6, #7C3AED)" />
-            : <HeroMetric label={`Revenue${segLabel}`} avgValue={avg7("total_revenue_gbp")} yesterdayValue={segmentedYesterday?.total_revenue_gbp ?? null} format="currency" tooltip={`Daily revenue · ${cfg.label}`} sparklineData={last7.map((m) => m.total_revenue_gbp ?? 0)} gradient={segment === "parents" ? "linear-gradient(135deg, #06B6D4, #0891B2)" : "linear-gradient(135deg, #EC4899, #DB2777)"} />
+          <HeroMetric label={`Cost Per Install${segLabel}${geoLabel}`} avgValue={avg7("cost_per_install_gbp")} yesterdayValue={geoYesterday?.cost_per_install_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / total installs" sparklineData={last7.map((m) => m.cost_per_install_gbp ?? 0)} gradient="linear-gradient(135deg, #F59E0B, #F97316)" />
+          <HeroMetric label={`Cost Per Trial${segLabel}${geoLabel}`} avgValue={avg7("cost_per_trial_gbp")} yesterdayValue={geoYesterday?.cost_per_trial_gbp ?? null} format="currency" invertColors tooltip="TikTok spend ÷ all trials (incl. organic — blended avg)" sparklineData={last7.map((m) => m.cost_per_trial_gbp ?? 0)} gradient="linear-gradient(135deg, #10B981, #059669)" />
+          {segment === "all" && geoSegment === "all"
+            ? <HeroMetric label="Cost Per Subscriber" avgValue={avg7("cost_per_subscriber_gbp")} yesterdayValue={geoYesterday?.cost_per_subscriber_gbp ?? null} format="currency" invertColors tooltip="TikTok spend ÷ all new subscribers (incl. organic — blended avg)" sparklineData={last7.map((m) => m.cost_per_subscriber_gbp ?? 0)} gradient="linear-gradient(135deg, #8B5CF6, #7C3AED)" />
+            : <HeroMetric label={`Revenue${segLabel}${geoLabel}`} avgValue={avg7("total_revenue_gbp")} yesterdayValue={geoYesterday?.total_revenue_gbp ?? null} format="currency" tooltip={`Daily revenue · ${cfg.label}${geoLabel}`} sparklineData={last7.map((m) => m.total_revenue_gbp ?? 0)} gradient={segment === "teens" ? "linear-gradient(135deg, #EC4899, #DB2777)" : geoSegment === "us" ? "linear-gradient(135deg, #3B82F6, #1D4ED8)" : geoSegment === "uk" ? "linear-gradient(135deg, #EF4444, #B91C1C)" : "linear-gradient(135deg, #06B6D4, #0891B2)"} />
           }
         </div>
 
@@ -179,15 +239,15 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
 
         {/* COST TREND CHARTS */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <TrendChart title={`Cost Per Install${segLabel}`} data={filteredHistory} dataKey="cost_per_install_gbp" color="#F59E0B" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
-          <TrendChart title={`Cost Per Trial${segLabel}`} subtitle="blended avg · incl. organic" data={filteredHistory} dataKey="cost_per_trial_gbp" color="#10B981" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
-          <TrendChart title={`Cost Per Subscriber${segLabel}`} subtitle="blended avg · incl. organic" data={filteredHistory} dataKey="cost_per_subscriber_gbp" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title={`Cost Per Install${segLabel}${geoLabel}`} data={filteredHistory} dataKey="cost_per_install_gbp" color="#F59E0B" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title={`Cost Per Trial${segLabel}${geoLabel}`} subtitle="blended avg · incl. organic" data={filteredHistory} dataKey="cost_per_trial_gbp" color="#10B981" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title={`Cost Per Subscriber${segLabel}${geoLabel}`} subtitle="blended avg · incl. organic" data={filteredHistory} dataKey="cost_per_subscriber_gbp" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
         </div>
 
         {/* VOLUME CHARTS */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <TrendChart title={`New Installs${segLabel}`} data={filteredHistory} dataKey="tiktok_installs" color="#3B82F6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
-          <TrendChart title={`New Trials${segLabel}`} data={filteredHistory} dataKey="total_trials" secondaryDataKey="non_onboarding_trials" secondaryLabel="Non-Onboarding" color="#10B981" secondaryColor="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title={`New Installs${segLabel}${geoLabel}`} data={filteredHistory} dataKey="tiktok_installs" color="#3B82F6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title={`New Trials${segLabel}${geoLabel}`} data={filteredHistory} dataKey="total_trials" secondaryDataKey="non_onboarding_trials" secondaryLabel="Non-Onboarding" color="#10B981" secondaryColor="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
           <TrendChart title="Subscribers" data={filteredHistory} dataKey="new_subscriptions" secondaryDataKey="churn" secondaryLabel="Churn" color="#10B981" secondaryColor="#EF4444" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
         </div>
 
@@ -198,7 +258,7 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
         {selectedDate && <DayDetailPanel date={selectedDate} metrics={selectedMetrics} activities={selectedActivities} onClose={() => setSelectedDate(null)} />}
 
         {/* AI INSIGHTS */}
-        <InsightsPanel today={segmentedToday ?? today} yesterday={segmentedYesterday} history={segmentedHistory} />
+        <InsightsPanel today={geoToday ?? today} yesterday={geoYesterday} history={geoHistory} />
 
         {/* Debug info at bottom */}
         {debugInfo && (
