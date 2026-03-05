@@ -159,9 +159,9 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
         {/* HERO METRICS */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <HeroMetric label={`Cost Per Install${segLabel}`} avgValue={avg7("cost_per_install_gbp")} yesterdayValue={segmentedYesterday?.cost_per_install_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / total installs" sparklineData={last7.map((m) => m.cost_per_install_gbp ?? 0)} gradient="linear-gradient(135deg, #F59E0B, #F97316)" />
-          <HeroMetric label={`Cost Per Trial${segLabel}`} avgValue={avg7("cost_per_trial_gbp")} yesterdayValue={segmentedYesterday?.cost_per_trial_gbp ?? null} format="currency" invertColors tooltip="TikTok ad spend / trial starts" sparklineData={last7.map((m) => m.cost_per_trial_gbp ?? 0)} gradient="linear-gradient(135deg, #10B981, #059669)" />
+          <HeroMetric label={`Cost Per Trial${segLabel}`} avgValue={avg7("cost_per_trial_gbp")} yesterdayValue={segmentedYesterday?.cost_per_trial_gbp ?? null} format="currency" invertColors tooltip="TikTok spend ÷ all trials (incl. organic — blended avg)" sparklineData={last7.map((m) => m.cost_per_trial_gbp ?? 0)} gradient="linear-gradient(135deg, #10B981, #059669)" />
           {segment === "all"
-            ? <HeroMetric label="Cost Per Subscriber" avgValue={avg7("cost_per_subscriber_gbp")} yesterdayValue={segmentedYesterday?.cost_per_subscriber_gbp ?? null} format="currency" invertColors tooltip="TikTok spend / new subscribers (7-day lag)" sparklineData={last7.map((m) => m.cost_per_subscriber_gbp ?? 0)} gradient="linear-gradient(135deg, #8B5CF6, #7C3AED)" />
+            ? <HeroMetric label="Cost Per Subscriber" avgValue={avg7("cost_per_subscriber_gbp")} yesterdayValue={segmentedYesterday?.cost_per_subscriber_gbp ?? null} format="currency" invertColors tooltip="TikTok spend ÷ all new subscribers (incl. organic — blended avg)" sparklineData={last7.map((m) => m.cost_per_subscriber_gbp ?? 0)} gradient="linear-gradient(135deg, #8B5CF6, #7C3AED)" />
             : <HeroMetric label={`Revenue${segLabel}`} avgValue={avg7("total_revenue_gbp")} yesterdayValue={segmentedYesterday?.total_revenue_gbp ?? null} format="currency" tooltip={`Daily revenue · ${cfg.label}`} sparklineData={last7.map((m) => m.total_revenue_gbp ?? 0)} gradient={segment === "parents" ? "linear-gradient(135deg, #06B6D4, #0891B2)" : "linear-gradient(135deg, #EC4899, #DB2777)"} />
           }
         </div>
@@ -180,8 +180,8 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
         {/* COST TREND CHARTS */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <TrendChart title={`Cost Per Install${segLabel}`} data={filteredHistory} dataKey="cost_per_install_gbp" color="#F59E0B" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
-          <TrendChart title={`Cost Per Trial${segLabel}`} data={filteredHistory} dataKey="cost_per_trial_gbp" color="#10B981" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
-          <TrendChart title={`Cost Per Subscriber${segLabel}`} data={filteredHistory} dataKey="cost_per_subscriber_gbp" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title={`Cost Per Trial${segLabel}`} subtitle="blended avg · incl. organic" data={filteredHistory} dataKey="cost_per_trial_gbp" color="#10B981" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
+          <TrendChart title={`Cost Per Subscriber${segLabel}`} subtitle="blended avg · incl. organic" data={filteredHistory} dataKey="cost_per_subscriber_gbp" color="#8B5CF6" onDayClick={handleChartClick} selectedDate={selectedDate} activities={activities} />
         </div>
 
         {/* VOLUME CHARTS */}
