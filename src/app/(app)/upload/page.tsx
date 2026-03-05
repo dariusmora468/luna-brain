@@ -27,20 +27,22 @@ function getYesterday(): string {
 }
 
 async function extractFileDate(file: File, type: FileType): Promise<string | null> {
-  if (type === "tiktok") {
-    // From filename: (2026-03-03 to 2026-03-03)
-    const match = file.name.match(/\((\d{4}-\d{2}-\d{2})\s+to/);
-    return match ? match[1] : null;
-  }
-  // For CSVs — read first 500 bytes and find a date on the second line
-  const text = await new Promise<string>((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve((e.target?.result as string) || "");
-    reader.readAsText(file.slice(0, 500));
-  });
-  for (const line of text.split("\n").slice(1)) {
-    const match = line.match(/(\d{4}-\d{2}-\d{2})/);
-    if (match) return match[1];
+  // First: try filename — works for TikTok (2026-03-04 to 2026-03-04.xlsx)
+  // and Purchasely (Luna - Conversion - 2026-03-05T10_37_20.csv)
+  const filenameMatch = file.name.match(/(\d{4}-\d{2}-\d{2})/);
+  if (filenameMatch) return filenameMatch[1];
+
+  // Fallback: scan first 500 bytes of CSV content for a date
+  if (type !== "tiktok") {
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve((e.target?.result as string) || "");
+      reader.readAsText(file.slice(0, 500));
+    });
+    for (const line of text.split("\n").slice(1)) {
+      const match = line.match(/(\d{4}-\d{2}-\d{2})/);
+      if (match) return match[1];
+    }
   }
   return null;
 }
