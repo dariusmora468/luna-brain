@@ -262,7 +262,8 @@ export default function DashboardView({ today: rawToday, yesterday: rawYesterday
         </div>
 
         {/* REVENUE (segmented) */}
-        <SegmentedRevenueChart data={filteredHistory} onDayClick={handleChartClick} selectedDate={selectedDate} dashboardSegment={segment} />
+        {/* Chart receives full geo+audience filtered history; manages its own time-range slice internally */}
+        <SegmentedRevenueChart data={geoHistory} onDayClick={handleChartClick} selectedDate={selectedDate} dashboardSegment={segment} />
 
         {/* DAY DETAIL */}
         {selectedDate && <DayDetailPanel date={selectedDate} metrics={selectedMetrics} activities={selectedActivities} onClose={() => setSelectedDate(null)} />}

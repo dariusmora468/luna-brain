@@ -155,7 +155,7 @@ const GROUP_SOURCE_LABELS: Record<string, string> = {
 function formatValue(val: number | null | undefined, format: string): string {
   if (val === null || val === undefined) return "—";
   switch (format) {
-    case "currency": return val.toFixed(2);
+    case "currency": return "£" + val.toFixed(2);
     case "percent": return val.toFixed(2) + "%";
     case "decimal": return val.toFixed(2);
     case "int": return Math.round(val).toString();
