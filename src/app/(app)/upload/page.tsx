@@ -27,24 +27,31 @@ function getYesterday(): string {
 }
 
 async function extractFileDate(file: File, type: FileType): Promise<string | null> {
-  // First: try filename — works for TikTok (2026-03-04 to 2026-03-04.xlsx)
-  // and Purchasely (Luna - Conversion - 2026-03-05T10_37_20.csv)
-  const filenameMatch = file.name.match(/(\d{4}-\d{2}-\d{2})/);
-  if (filenameMatch) return filenameMatch[1];
+  // Capture the date AND the character immediately after it in the filename.
+  // If followed by "T" it's a Purchasely export timestamp (2026-03-06T09_24_03),
+  // NOT the data date — in that case scan the CSV content instead.
+  // TikTok filenames: "2026-03-04 to 2026-03-04.xlsx" → followed by " ", safe to use.
+  const filenameMatch = file.name.match(/(\d{4}-\d{2}-\d{2})(T\d{2})?/);
+  const filenameDate = filenameMatch?.[1] ?? null;
+  const isExportTimestamp = !!filenameMatch?.[2]; // true if followed by T09, T10, etc.
 
-  // Fallback: scan first 500 bytes of CSV content for a date
+  if (filenameDate && !isExportTimestamp) return filenameDate;
+
+  // Scan CSV content — used for Purchasely files (data date is in row 2, e.g. "2026-03-05 00:00:00")
   if (type !== "tiktok") {
     const text = await new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => resolve((e.target?.result as string) || "");
-      reader.readAsText(file.slice(0, 500));
+      reader.readAsText(file.slice(0, 2000));
     });
     for (const line of text.split("\n").slice(1)) {
       const match = line.match(/(\d{4}-\d{2}-\d{2})/);
       if (match) return match[1];
     }
   }
-  return null;
+
+  // Last resort: use the filename date even if it looked like a timestamp
+  return filenameDate;
 }
 
 function detectFileType(name: string): FileType {
