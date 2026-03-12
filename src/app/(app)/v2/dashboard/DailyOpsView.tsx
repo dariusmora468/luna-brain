@@ -23,7 +23,7 @@ interface Props {
   importStatus?: TabStatus[];
 }
 
-type RangeKey = "14d" | "30d" | "all";
+type RangeKey = "1d" | "7d" | "30d" | "90d";
 
 // Summary of last N days
 function summarise(rows: DailyActualsRow[], n: number) {
@@ -131,7 +131,8 @@ export default function DailyOpsView({ dailyRows, experiments, importStatus }: P
   const [range, setRange] = useState<RangeKey>("30d");
   const [showOverlay, setShowOverlay] = useState(false);
 
-  const rangeMap: Record<RangeKey, number> = { "14d": 14, "30d": 30, all: 999 };
+  const rangeMap: Record<RangeKey, number> = { "1d": 1, "7d": 7, "30d": 30, "90d": 90 };
+  const rangeLabel: Record<RangeKey, string> = { "1d": "Yesterday", "7d": "Last 7 days", "30d": "Last 30 days", "90d": "Last 90 days" };
   const sliceN = rangeMap[range];
 
   const slicedRows = useMemo(() => dailyRows.slice(-sliceN), [dailyRows, sliceN]);
@@ -229,7 +230,7 @@ export default function DailyOpsView({ dailyRows, experiments, importStatus }: P
 
           {/* Range selector */}
           <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
-            {(["14d", "30d", "all"] as RangeKey[]).map((r) => (
+            {(["1d", "7d", "30d", "90d"] as RangeKey[]).map((r) => (
               <button
                 key={r}
                 onClick={() => setRange(r)}
@@ -237,7 +238,7 @@ export default function DailyOpsView({ dailyRows, experiments, importStatus }: P
                   range === r ? "bg-white text-gray-900 shadow-sm" : "text-gray-400 hover:text-gray-600"
                 }`}
               >
-                {r === "all" ? "All" : r}
+                {r === "1d" ? "Yesterday" : r}
               </button>
             ))}
           </div>
@@ -250,19 +251,19 @@ export default function DailyOpsView({ dailyRows, experiments, importStatus }: P
           label="TikTok Spend"
           value={fmtGBP(stats.spend)}
           change={fmtChange(pctChange(stats.spend, stats.prevSpend))}
-          sub={`${sliceN}d total`}
+          sub={rangeLabel[range]}
         />
         <HeroCard
           label="New Paid Subs"
           value={fmtNum(stats.subs)}
           change={fmtChange(pctChange(stats.subs, stats.prevSubs))}
-          sub={`${sliceN}d total`}
+          sub={rangeLabel[range]}
         />
         <HeroCard
           label="Revenue"
           value={fmtGBP(stats.revenue)}
           change={fmtChange(pctChange(stats.revenue, stats.prevRevenue))}
-          sub={`${sliceN}d total`}
+          sub={rangeLabel[range]}
         />
         {/* CPI (Adjust) — always shown, clearly labelled as Adjust-based */}
         <HeroCard
