@@ -5,6 +5,129 @@ import { ExperimentRow } from "@/lib/v2/parsers";
 import { ImportStatusBar } from "@/components/ImportStatusBar";
 import type { TabStatus } from "@/components/ImportStatusBar";
 
+// ── Formatting helpers ────────────────────────────────────────────────────────
+
+function fmtGbp(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return `£${v.toFixed(2)}`;
+}
+
+function fmtNum(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return v.toLocaleString();
+}
+
+// ── MetricPill ────────────────────────────────────────────────────────────────
+
+function MetricPill({
+  label,
+  value,
+  note,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  note?: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className={`rounded-lg p-2 text-center ${highlight ? "bg-amber-50 border border-amber-200" : "bg-gray-50"}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</p>
+      <p className={`text-sm font-bold mt-0.5 ${highlight ? "text-amber-700" : "text-gray-800"}`}>{value}</p>
+      {note && <p className="text-[9px] text-gray-400 mt-0.5">{note}</p>}
+    </div>
+  );
+}
+
+// ── LTV:CAC Trend Chart (SVG) ─────────────────────────────────────────────────
+
+function LtvCacTrendChart({ experiments }: { experiments: ExperimentRow[] }) {
+  const points = useMemo(() => {
+    return experiments
+      .filter((e) => e.status === "Done" && e.ltv_cac !== null && e.end_date)
+      .sort((a, b) => (a.end_date ?? "").localeCompare(b.end_date ?? ""))
+      .map((e) => ({ name: e.name, date: e.end_date!, ltv_cac: e.ltv_cac! }));
+  }, [experiments]);
+
+  if (points.length < 2) return null;
+
+  const W = 600;
+  const H = 140;
+  const PAD_L = 36;
+  const PAD_R = 16;
+  const PAD_T = 12;
+  const PAD_B = 28;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+
+  const maxVal = Math.max(...points.map((p) => p.ltv_cac), 3.5);
+  const toX = (i: number) =>
+    PAD_L + (points.length === 1 ? chartW / 2 : (i / (points.length - 1)) * chartW);
+  const toY = (v: number) => PAD_T + chartH - (v / maxVal) * chartH;
+
+  const polyline = points.map((p, i) => `${toX(i)},${toY(p.ltv_cac)}`).join(" ");
+
+  // Reference y values (clamped to chart)
+  const y3 = toY(3);
+  const y1 = toY(1);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6 p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">LTV:CAC Trend Across Experiments</p>
+          <p className="text-xs text-gray-400 mt-0.5">Is it going in the right direction?</p>
+        </div>
+        <div className="flex items-center gap-4 text-[10px] text-gray-400">
+          <span className="flex items-center gap-1"><span className="w-4 border-t-2 border-dashed border-green-400 inline-block" />Target 3×</span>
+          <span className="flex items-center gap-1"><span className="w-4 border-t-2 border-dashed border-red-400 inline-block" />Break-even 1×</span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: 140 }}>
+        {/* Y-axis labels */}
+        {[0, 1, 2, 3].map((v) => {
+          const y = toY(v);
+          if (y < PAD_T || y > PAD_T + chartH) return null;
+          return (
+            <text key={v} x={PAD_L - 4} y={y + 4} textAnchor="end" fontSize={9} fill="#9CA3AF">
+              {v}×
+            </text>
+          );
+        })}
+
+        {/* Reference lines */}
+        {y3 >= PAD_T && y3 <= PAD_T + chartH && (
+          <line x1={PAD_L} y1={y3} x2={W - PAD_R} y2={y3} stroke="#4ADE80" strokeWidth={1} strokeDasharray="4 3" />
+        )}
+        {y1 >= PAD_T && y1 <= PAD_T + chartH && (
+          <line x1={PAD_L} y1={y1} x2={W - PAD_R} y2={y1} stroke="#F87171" strokeWidth={1} strokeDasharray="4 3" />
+        )}
+
+        {/* Line */}
+        <polyline points={polyline} fill="none" stroke="#F59E0B" strokeWidth={2} strokeLinejoin="round" />
+
+        {/* Data points + labels */}
+        {points.map((p, i) => (
+          <g key={i}>
+            <circle cx={toX(i)} cy={toY(p.ltv_cac)} r={4} fill="#F59E0B" />
+            <text
+              x={toX(i)}
+              y={PAD_T + chartH + 16}
+              textAnchor="middle"
+              fontSize={8}
+              fill="#6B7280"
+              className="select-none"
+            >
+              {p.date.slice(5)}
+            </text>
+            <title>{p.name}: {p.ltv_cac.toFixed(2)}×</title>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 interface Props {
   experiments: ExperimentRow[];
   importStatus?: TabStatus[];
@@ -244,6 +367,9 @@ export default function ExperimentsView({ experiments, importStatus }: Props) {
           </select>
         )}
       </div>
+
+      {/* ── LTV:CAC Trend Chart ──────────────────────────────────────────── */}
+      <LtvCacTrendChart experiments={experiments} />
 
       {/* ── Gantt Chart ─────────────────────────────────────────────────── */}
       {filtered.length > 0 && (
@@ -486,6 +612,26 @@ export default function ExperimentsView({ experiments, importStatus }: Props) {
               <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-yellow-100 text-yellow-700">
                 Decision TBD
               </span>
+            )}
+
+            {/* Unit economics (only shown when any CAC/LTV field is populated) */}
+            {(exp.realized_cac != null || exp.projected_ltv != null || exp.ltv_cac != null) && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-2">Unit Economics</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <MetricPill label="CAC" value={fmtGbp(exp.realized_cac)} note="Realized" />
+                  <MetricPill label="LTV₀" value={fmtGbp(exp.realized_ltv0)} note="Realized" />
+                  <MetricPill label="Proj. LTV" value={fmtGbp(exp.projected_ltv)} note="Estimated" />
+                  <MetricPill
+                    label="LTV:CAC"
+                    value={exp.ltv_cac != null ? `${exp.ltv_cac.toFixed(2)}×` : "—"}
+                    note="Target ≥3×"
+                    highlight={exp.ltv_cac != null}
+                  />
+                  <MetricPill label="CPI" value={fmtGbp(exp.cpi_during)} />
+                  <MetricPill label="Trials" value={fmtNum(exp.trial_starts)} />
+                </div>
+              </div>
             )}
           </div>
         ))}

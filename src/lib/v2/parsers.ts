@@ -83,6 +83,14 @@ export interface ExperimentRow {
   variant_b_metric: string;
   winner: string;
   days_running: number | null;
+  // V3 unit economics — filled manually in the Experiment Log sheet
+  realized_cac:    number | null;
+  realized_ltv0:   number | null;
+  projected_ltv:   number | null;
+  ltv_cac:         number | null;
+  cpi_during:      number | null;
+  trial_starts:    number | null;
+  conversion_rate: number | null;
   raw: Record<string, string>;
 }
 
@@ -106,6 +114,17 @@ export function parseExperimentRow(row: Record<string, string>): ExperimentRow |
     daysRunning = Math.round(ms / (1000 * 60 * 60 * 24));
   }
 
+  const realizedCac  = num(row["Realized CAC"]  ?? row["CAC (Realized)"] ?? row["CAC"] ?? null);
+  const projectedLtv = num(row["Projected LTV"] ?? row["LTV (Projected)"] ?? null);
+  const ltvCacRaw    = num(row["LTV:CAC"]        ?? row["LTV to CAC"]     ?? null);
+  // Compute LTV:CAC from parts if not directly in sheet
+  const ltvCac =
+    ltvCacRaw !== null
+      ? ltvCacRaw
+      : projectedLtv !== null && realizedCac !== null && realizedCac > 0
+      ? projectedLtv / realizedCac
+      : null;
+
   return {
     name: name.trim(),
     status: (row["Status"] ?? "Not Started").trim(),
@@ -120,6 +139,13 @@ export function parseExperimentRow(row: Record<string, string>): ExperimentRow |
     variant_b_metric: (row["Variant B Metric"] ?? row["Variant B"] ?? row["B Metric"] ?? "").trim(),
     winner: (row["Winner"] ?? "").trim(),
     days_running: daysRunning,
+    realized_cac:    realizedCac,
+    realized_ltv0:   num(row["Realized LTV0"] ?? row["LTV0"] ?? row["Realized LTV"] ?? null),
+    projected_ltv:   projectedLtv,
+    ltv_cac:         ltvCac,
+    cpi_during:      num(row["CPI During Experiment"] ?? row["CPI During"] ?? null),
+    trial_starts:    num(row["Trial Starts"] ?? row["Trials During Experiment"] ?? null),
+    conversion_rate: num(row["Conversion Rate"] ?? row["CVR"] ?? null),
     raw: row,
   };
 }
