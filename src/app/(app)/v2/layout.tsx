@@ -9,6 +9,7 @@ const NAV = [
   { label: "Weekly", href: "/v2/weekly", icon: "📅" },
   { label: "Monthly", href: "/v2/monthly", icon: "📈" },
   { label: "Import", href: "/v2/import", icon: "⬆️" },
+  { label: "Data", href: "/v2/data", icon: "🗂️" },
   { label: "Dictionary", href: "/v2/dictionary", icon: "📖" },
 ];
 
