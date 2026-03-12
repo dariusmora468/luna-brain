@@ -1,21 +1,11 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ReferenceLine,
-  CartesianGrid,
-  Legend,
-} from "recharts";
 import { DailyActualsRow, ExperimentRow } from "@/lib/v2/parsers";
-import { fmtGBP, fmtNum, fmtPct, pctChange, fmtChange } from "@/lib/v2/helpers";
+import { fmtGBP, fmtNum, pctChange, fmtChange } from "@/lib/v2/helpers";
 import { MetricTooltip } from "@/components/MetricTooltip";
 import { ImportStatusBar, TabStatus } from "@/components/ImportStatusBar";
+import { UnifiedChart } from "./UnifiedChart";
 
 interface Props {
   dailyRows: DailyActualsRow[];
@@ -112,21 +102,6 @@ function HeroCard({ label, value, change, sub, approx, tooltip }: HeroCardProps)
   );
 }
 
-// Custom tooltip for line charts
-function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-3 text-xs">
-      <p className="font-semibold text-gray-700 mb-1">{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} style={{ color: p.color }}>
-          {p.name}: {typeof p.value === "number" && p.value > 100 ? fmtNum(p.value) : p.value?.toFixed(2)}
-        </p>
-      ))}
-    </div>
-  );
-}
-
 export default function DailyOpsView({ dailyRows, experiments, importStatus }: Props) {
   const [range, setRange] = useState<RangeKey>("30d");
   const [showOverlay, setShowOverlay] = useState(false);
@@ -137,29 +112,6 @@ export default function DailyOpsView({ dailyRows, experiments, importStatus }: P
 
   const slicedRows = useMemo(() => dailyRows.slice(-sliceN), [dailyRows, sliceN]);
   const stats = useMemo(() => summarise(dailyRows, Math.min(sliceN, dailyRows.length)), [dailyRows, sliceN]);
-
-  // Chart data — null values stay null so Recharts renders gaps (broken lines)
-  // rather than zero dips. connectNulls={false} is the Recharts default.
-  const chartData = useMemo(
-    () =>
-      slicedRows.map((r) => ({
-        date: r.date.slice(5), // "MM-DD"
-        Spend: r.tiktok_spend,
-        Installs: r.adjust_total_installs,
-        "New Subs": r.new_paid_subs,
-        Revenue: r.revenue,
-        MRR: r.mrr,
-      })),
-    [slicedRows]
-  );
-
-  // MRR sparsity — if >50% of rows in the current slice have null MRR,
-  // show a note below the chart explaining gaps are expected.
-  const mrrNullFraction = useMemo(() => {
-    if (slicedRows.length === 0) return 0;
-    const nulls = slicedRows.filter((r) => r.mrr === null).length;
-    return nulls / slicedRows.length;
-  }, [slicedRows]);
 
   // Experiment reference lines (for overlay)
   const expLines = useMemo(() => {
@@ -338,85 +290,8 @@ export default function DailyOpsView({ dailyRows, experiments, importStatus }: P
         </div>
       </div>
 
-      {/* Charts */}
-      <div className="space-y-5">
-        {/* Spend + Installs */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">Spend & Installs</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9CA3AF" }} interval="preserveStartEnd" />
-              <YAxis yAxisId="spend" tick={{ fontSize: 10, fill: "#9CA3AF" }} width={40} />
-              <YAxis yAxisId="installs" orientation="right" tick={{ fontSize: 10, fill: "#9CA3AF" }} width={40} />
-              <Tooltip content={<ChartTooltip />} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              {expLines.map((line) => (
-                <ReferenceLine
-                  key={`${line.name}-${line.type}`}
-                  x={line.date}
-                  yAxisId="spend"
-                  stroke={line.type === "start" ? "#F59E0B" : "#9CA3AF"}
-                  strokeDasharray="4 2"
-                  strokeWidth={1.5}
-                  label={{ value: line.name.slice(0, 15), position: "top", fontSize: 8, fill: "#9CA3AF" }}
-                />
-              ))}
-              <Line yAxisId="spend" type="monotone" dataKey="Spend" stroke="#F59E0B" strokeWidth={2} dot={false} />
-              <Line yAxisId="installs" type="monotone" dataKey="Installs" stroke="#3B82F6" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* New Subs + Revenue */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-700 mb-4">New Subs & Revenue</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9CA3AF" }} interval="preserveStartEnd" />
-              <YAxis yAxisId="subs" tick={{ fontSize: 10, fill: "#9CA3AF" }} width={40} />
-              <YAxis yAxisId="revenue" orientation="right" tick={{ fontSize: 10, fill: "#9CA3AF" }} width={45} />
-              <Tooltip content={<ChartTooltip />} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              {expLines.map((line) => (
-                <ReferenceLine
-                  key={`${line.name}-${line.type}-r`}
-                  x={line.date}
-                  yAxisId="subs"
-                  stroke={line.type === "start" ? "#F59E0B" : "#9CA3AF"}
-                  strokeDasharray="4 2"
-                  strokeWidth={1.5}
-                />
-              ))}
-              <Line yAxisId="subs" type="monotone" dataKey="New Subs" stroke="#10B981" strokeWidth={2} dot={false} />
-              <Line yAxisId="revenue" type="monotone" dataKey="Revenue" stroke="#F97316" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* MRR trend */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-700 mb-1 flex items-center gap-1">
-            MRR Trend
-            <MetricTooltip metricKey="mrr" />
-          </h3>
-          {mrrNullFraction > 0.5 && (
-            <p className="text-xs text-gray-400 mb-3">
-              MRR is recorded periodically — gaps between entries are expected.
-            </p>
-          )}
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-              <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#9CA3AF" }} interval="preserveStartEnd" />
-              <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} width={50} />
-              <Tooltip content={<ChartTooltip />} />
-              <Line type="monotone" dataKey="MRR" stroke="#8B5CF6" strokeWidth={2.5} dot={false} connectNulls={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      {/* Unified metric chart */}
+      <UnifiedChart rows={slicedRows} experiments={experiments} showExpOverlay={showOverlay} />
     </div>
   );
 }
