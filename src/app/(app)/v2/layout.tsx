@@ -5,6 +5,7 @@ import V2Toggle from "@/components/V2Toggle";
 
 const NAV = [
   { label: "Dashboard", href: "/v2/dashboard", icon: "📊" },
+  { label: "Metrics", href: "/v2/metrics", icon: "📐" },
   { label: "Experiments", href: "/v2/experiments", icon: "🧪" },
   { label: "Weekly", href: "/v2/weekly", icon: "📅" },
   { label: "Monthly", href: "/v2/monthly", icon: "📈" },
