@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import V2Toggle from "@/components/V2Toggle";
 
 const NAV_ITEMS = [
   {
@@ -84,6 +85,11 @@ export default function Sidebar() {
             <p className="text-[10px] text-gray-400 font-medium">Growth Intelligence</p>
           </div>
         </div>
+      </div>
+
+      {/* V1/V2 toggle */}
+      <div className="px-3 pb-2 hidden lg:flex justify-center">
+        <V2Toggle />
       </div>
 
       {/* Main nav */}
