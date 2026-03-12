@@ -59,6 +59,62 @@ export function parseRevenueCSV(csvText: string, targetDate?: string): RevenueRa
   return { apple, google };
 }
 
+export function parseRevenueByCountryCSV(csvText: string, targetDate?: string): { us: number; gb: number; au: number; nl: number; se: number } {
+  const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+  const rows = parsed.data as Record<string, string>[];
+
+  let targetRow: Record<string, string> | undefined;
+  if (targetDate) {
+    targetRow = rows.find((r) => (r["Period"] || "").substring(0, 10) === targetDate);
+  }
+  if (!targetRow) targetRow = rows[rows.length - 1];
+  if (!targetRow) return { us: 0, gb: 0, au: 0, nl: 0, se: 0 };
+
+  const gb = parseFloat(targetRow["United Kingdom"] || "0");
+  const us = parseFloat(targetRow["United States"] || "0");
+  const au = parseFloat(targetRow["Australia"] || "0");
+  const nl = parseFloat(targetRow["Netherlands"] || "0");
+  const se = parseFloat(targetRow["Sweden"] || "0");
+  return { us, gb, au, nl, se };
+}
+
+export function parseRevenueByPlansCSV(csvText: string, targetDate?: string): {
+  parent_annual: number;
+  parent_monthly: number;
+  teen_annual: number;
+  teen_monthly: number;
+  teen_weekly: number;
+} {
+  const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+  const rows = parsed.data as Record<string, string>[];
+
+  let targetRow: Record<string, string> | undefined;
+  if (targetDate) {
+    targetRow = rows.find((r) => (r["Period"] || "").substring(0, 10) === targetDate);
+  }
+  if (!targetRow) targetRow = rows[rows.length - 1];
+  if (!targetRow) return { parent_annual: 0, parent_monthly: 0, teen_annual: 0, teen_monthly: 0, teen_weekly: 0 };
+
+  let parent_annual = 0, parent_monthly = 0, teen_annual = 0, teen_monthly = 0, teen_weekly = 0;
+
+  for (const [key, val] of Object.entries(targetRow)) {
+    if (key === "Period") continue;
+    const k = key.toLowerCase();
+    const v = parseFloat(val || "0");
+    if (isNaN(v)) continue;
+
+    const isParent = k.includes("parent");
+    // Check annual before weekly — "Premium Annual - 39.99 w 1 week free" contains both
+    if (isParent && k.includes("annual")) parent_annual += v;
+    else if (isParent && k.includes("monthly")) parent_monthly += v;
+    else if (!isParent && k.includes("annual")) teen_annual += v;
+    else if (!isParent && k.includes("weekly")) teen_weekly += v;
+    else if (!isParent && k.includes("monthly")) teen_monthly += v;
+  }
+
+  return { parent_annual, parent_monthly, teen_annual, teen_monthly, teen_weekly };
+}
+
 export function parseSubsCSV(csvText: string, targetDate?: string): SubsRawData {
   const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
   const rows = parsed.data as Record<string, string>[];
@@ -161,21 +217,40 @@ export async function parseTikTokXLSX(buffer: ArrayBuffer): Promise<TikTokRawDat
   let impressions = 0;
   let clicks = 0;
 
+  // Segment split: campaigns containing "teens" → teen, "parents" → parent
+  let parentInstalls = 0;
+  let parentSpend = 0;
+  let teenInstalls = 0;
+  let teenSpend = 0;
+
   for (const row of rows) {
     // Skip TikTok's summary/totals rows (e.g. "Total of X results")
     const campaignName = String(row["Campaign name"] || row["Campaign Name"] || "");
     if (campaignName.toLowerCase().startsWith("total")) continue;
-    
+
     // TikTok columns may vary — handle common variations
-    installs += Number(row["Result"] || row["Conversions"] || row["Install"] || 0);
-    spend += Number(row["Cost"] || row["Spend"] || row["Total Cost"] || 0);
+    const rowInstalls = Number(row["Result"] || row["Conversions"] || row["Install"] || 0);
+    const rowSpend   = Number(row["Cost"] || row["Spend"] || row["Total Cost"] || 0);
+    installs   += rowInstalls;
+    spend      += rowSpend;
     impressions += Number(row["Impressions"] || row["Impression"] || 0);
-    clicks += Number(row["Clicks"] || row["Clicks (destination)"] || row["Click"] || 0);
+    clicks     += Number(row["Clicks"] || row["Clicks (destination)"] || row["Click"] || 0);
+
+    // Segment attribution by campaign name keyword
+    const nameLower = campaignName.toLowerCase();
+    if (nameLower.includes("teens")) {
+      teenInstalls += rowInstalls;
+      teenSpend    += rowSpend;
+    } else {
+      // Campaigns containing "parents" or any unrecognised campaign → parent
+      parentInstalls += rowInstalls;
+      parentSpend    += rowSpend;
+    }
   }
 
   const cpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
 
-  return { installs, spend, impressions, clicks, cpm };
+  return { installs, spend, impressions, clicks, cpm, parentInstalls, parentSpend, teenInstalls, teenSpend };
 }
 
 // ---- Core Metric Computation ----
@@ -189,10 +264,13 @@ interface ComputeInput {
   screenViews: ScreenViewRow[];
   // For 7-day lag metrics
   spendSevenDaysAgo?: number | null;
+  // Revenue segments (from revenues-by-country.csv and revenues-by-plans.csv)
+  revenueByCountry?: { us: number; gb: number; au: number; nl: number; se: number };
+  revenueByPlans?: { parent_annual: number; parent_monthly: number; teen_annual: number; teen_monthly: number; teen_weekly: number };
 }
 
 export function computeMetrics(input: ComputeInput): Omit<DailyMetrics, "id" | "computed_at" | "updated_at"> {
-  const { date, tiktok, revenue, subs, conversions, screenViews, spendSevenDaysAgo } = input;
+  const { date, tiktok, revenue, subs, conversions, screenViews, spendSevenDaysAgo, revenueByCountry, revenueByPlans } = input;
 
   // ---- Trials from conversions ----
   const onboardingConversions = conversions.filter(
@@ -234,6 +312,21 @@ export function computeMetrics(input: ComputeInput): Omit<DailyMetrics, "id" | "
     .reduce((sum, c) => sum + c.conversions_to_offer_price + c.conversions_to_regular_price, 0);
   const gbTrials = conversions
     .filter((c) => c.country === "GB")
+    .reduce((sum, c) => sum + c.conversions_to_offer_price + c.conversions_to_regular_price, 0);
+
+  // ---- Audience breakdown (parent vs teen) ----
+  // Parent = presentation or plan contains "parent"
+  const parentTrials = conversions
+    .filter((c) =>
+      c.presentation_id?.toLowerCase().includes("parent") ||
+      c.plan_id?.toLowerCase().includes("parent")
+    )
+    .reduce((sum, c) => sum + c.conversions_to_offer_price + c.conversions_to_regular_price, 0);
+  const teenTrials = conversions
+    .filter((c) =>
+      !c.presentation_id?.toLowerCase().includes("parent") &&
+      !c.plan_id?.toLowerCase().includes("parent")
+    )
     .reduce((sum, c) => sum + c.conversions_to_offer_price + c.conversions_to_regular_price, 0);
 
   // ---- Revenue ----
@@ -378,17 +471,30 @@ export function computeMetrics(input: ComputeInput): Omit<DailyMetrics, "id" | "
     // Market
     us_trials: usTrials,
     gb_trials: gbTrials,
-    us_revenue_gbp: 0, // TODO: derive from conversions when market-level revenue is available
-    gb_revenue_gbp: 0,
+    us_revenue_gbp: revenueByCountry?.us ?? 0,
+    gb_revenue_gbp: revenueByCountry?.gb ?? 0,
+    au_revenue_gbp: revenueByCountry?.au ?? 0,
+    nl_revenue_gbp: revenueByCountry?.nl ?? 0,
+    se_revenue_gbp: revenueByCountry?.se ?? 0,
 
-    // Revenue segments (populated via /api/import/revenue CSV upload)
-    parent_revenue_gbp: 0,
-    teen_revenue_gbp: 0,
-    rev_parent_annual_gbp: 0,
-    rev_parent_monthly_gbp: 0,
-    rev_teen_annual_gbp: 0,
-    rev_teen_monthly_gbp: 0,
-    rev_teen_weekly_gbp: 0,
+    // Audience trials
+    parent_trials: parentTrials,
+    teen_trials: teenTrials,
+
+    // TikTok spend & installs by segment
+    parent_spend_gbp: tiktok.parentSpend,
+    teen_spend_gbp: tiktok.teenSpend,
+    parent_installs: tiktok.parentInstalls,
+    teen_installs: tiktok.teenInstalls,
+
+    // Revenue segments (populated from revenues-by-plans.csv)
+    parent_revenue_gbp: revenueByPlans ? revenueByPlans.parent_annual + revenueByPlans.parent_monthly : 0,
+    teen_revenue_gbp: revenueByPlans ? revenueByPlans.teen_annual + revenueByPlans.teen_monthly + revenueByPlans.teen_weekly : 0,
+    rev_parent_annual_gbp: revenueByPlans?.parent_annual ?? 0,
+    rev_parent_monthly_gbp: revenueByPlans?.parent_monthly ?? 0,
+    rev_teen_annual_gbp: revenueByPlans?.teen_annual ?? 0,
+    rev_teen_monthly_gbp: revenueByPlans?.teen_monthly ?? 0,
+    rev_teen_weekly_gbp: revenueByPlans?.teen_weekly ?? 0,
 
     // Detail
     placement_breakdown: placementBreakdown,

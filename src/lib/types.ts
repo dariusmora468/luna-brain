@@ -54,6 +54,19 @@ export interface DailyMetrics {
   gb_trials: number;
   us_revenue_gbp: number;
   gb_revenue_gbp: number;
+  au_revenue_gbp: number;
+  nl_revenue_gbp: number;
+  se_revenue_gbp: number;
+
+  // Trials by audience
+  parent_trials: number | null;
+  teen_trials: number | null;
+
+  // TikTok spend & installs by segment (from campaign name split)
+  parent_spend_gbp: number | null;
+  teen_spend_gbp: number | null;
+  parent_installs: number | null;
+  teen_installs: number | null;
 
   // Revenue by audience
   parent_revenue_gbp: number;
@@ -129,6 +142,11 @@ export interface TikTokRawData {
   impressions: number;
   clicks: number;
   cpm: number;
+  // Segment split (from campaign names containing "parents" / "teens")
+  parentInstalls: number;
+  parentSpend: number;
+  teenInstalls: number;
+  teenSpend: number;
 }
 
 export interface RevenueRawData {

@@ -3,31 +3,181 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
+type FileType =
+  | "tiktok"
+  | "conversions"
+  | "screenviews"
+  | "subscriptions"
+  | "revenue_stores"
+  | "revenue_country"
+  | "revenue_plans"
+  | "unknown";
+
 interface UploadFile {
   name: string;
   file: File;
-  type: "tiktok" | "revenue" | "subscriptions" | "conversions" | "screenviews" | "unknown";
-  status: "pending" | "ready";
+  type: FileType;
+  detectedDate: string | null;
 }
 
-function detectFileType(name: string): UploadFile["type"] {
+function getYesterday(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+async function extractFileDate(file: File, type: FileType): Promise<string | null> {
+  // Capture the date AND the character immediately after it in the filename.
+  // If followed by "T" it's a Purchasely export timestamp (2026-03-06T09_24_03),
+  // NOT the data date — in that case scan the CSV content instead.
+  // TikTok filenames: "2026-03-04 to 2026-03-04.xlsx" → followed by " ", safe to use.
+  const filenameMatch = file.name.match(/(\d{4}-\d{2}-\d{2})(T\d{2})?/);
+  const filenameDate = filenameMatch?.[1] ?? null;
+  const isExportTimestamp = !!filenameMatch?.[2]; // true if followed by T09, T10, etc.
+
+  if (filenameDate && !isExportTimestamp) return filenameDate;
+
+  // Scan CSV content — used for Purchasely files (data date is in row 2, e.g. "2026-03-05 00:00:00")
+  if (type !== "tiktok") {
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve((e.target?.result as string) || "");
+      reader.readAsText(file.slice(0, 2000));
+    });
+    for (const line of text.split("\n").slice(1)) {
+      const match = line.match(/(\d{4}-\d{2}-\d{2})/);
+      if (match) return match[1];
+    }
+  }
+
+  // Last resort: use the filename date even if it looked like a timestamp
+  return filenameDate;
+}
+
+function detectFileType(name: string): FileType {
   const lower = name.toLowerCase();
-  if (lower.includes("campaign") || lower.includes("tiktok")) return "tiktok";
-  if (lower.includes("revenue")) return "revenue";
-  if (lower.includes("subscription") || lower.includes("churn")) return "subscriptions";
+  if (lower.includes("campaign") || (lower.includes("tiktok") && lower.includes("report"))) return "tiktok";
   if (lower.includes("conversion")) return "conversions";
   if (lower.includes("screen") && lower.includes("view")) return "screenviews";
+  if (lower.includes("subscription") || lower.includes("churn")) return "subscriptions";
+  if (lower.includes("revenue") && lower.includes("country")) return "revenue_country";
+  if (lower.includes("revenue") && lower.includes("plan")) return "revenue_plans";
+  if (lower.includes("revenue") && lower.includes("store")) return "revenue_stores";
+  if (lower.includes("revenue")) return "revenue_stores";
   return "unknown";
 }
 
-const FILE_LABELS: Record<string, { label: string; color: string }> = {
-  tiktok: { label: "TikTok Ads", color: "bg-pink-50 text-pink-600 border-pink-200" },
-  revenue: { label: "Store Revenue", color: "bg-blue-50 text-blue-600 border-blue-200" },
-  subscriptions: { label: "Subscriptions", color: "bg-purple-50 text-purple-600 border-purple-200" },
-  conversions: { label: "Purchasely Conversions", color: "bg-emerald-50 text-emerald-600 border-emerald-200" },
-  screenviews: { label: "Purchasely Screen Views", color: "bg-teal-50 text-teal-600 border-teal-200" },
-  unknown: { label: "Unknown", color: "bg-gray-100 text-gray-500 border-gray-200" },
-};
+// ---- Source group URL builders ----
+
+function buildTikTokUrl(date: string) {
+  return `https://ads.tiktok.com/i18n/manage/campaign?aadvid=7279002125701595138&sort_state=ctr&sort_order=1&relative_time=1&filters%5B0%5D%5Bfield%5D=campaign_status&filters%5B0%5D%5Bin_field_values%5D%5B0%5D=delivery_ok&filters%5B0%5D%5Bfilter_type%5D=0&st=${date}&et=${date}`;
+}
+
+function buildPurchaselySubsUrl(date: string) {
+  const dr = encodeURIComponent(`${date}T00:00:00.000Z,${date}T00:00:00.000Z`);
+  return `https://console.purchasely.io/app_LqxssVldDI20rClHxeoFUTvC6yoPOr/dashboards/subscriptions?date_range%5B%5D=${dr}&primary_metric=paywalls_viewed&secondary_metric=conversions_to_regular_ratio&group_by_primary=none&group_by_secondary=none&primary_metric_sub_evolution=all&group_by_primary_sub_evolution=none&offer_types%5B%5D=NONE%2CINTRO_OFFER%2CPROMOTIONAL_OFFER%2CPROMO_CODE`;
+}
+
+function buildPurchaselyConvUrl(date: string) {
+  const dr = encodeURIComponent(`${date}T00:00:00.000Z,${date}T00:00:00.000Z`);
+  return `https://console.purchasely.io/app_LqxssVldDI20rClHxeoFUTvC6yoPOr/dashboards/conversion?date_range%5B%5D=${dr}&primary_metric=unique_viewers&secondary_metric=conversions_to_offer_count&group_by_primary=none&group_by_secondary=country&primary_metric_sub_evolution=all&group_by_primary_sub_evolution=none&placements%5B%5D=plac_gvXbX7H4ZXWZCiUiy4nCnr44JOsYIdS1%2Cplac_CuGQ9FOmG0LZuRwlRqslqLZiANlQZVMd%2Cplac_z2g1ZzLErwl7vgeVTawyBhE6kblC0Gk%2Cplac_IimeiB5pmR4LAAnAxYO1ONIsIVtws%2Cplac_kLsaF2kQCFt6cLmAEqaSgaHdeaBAcI%2Cplac_8R2GVz5FglxSHOH683EHdWmPwRQhQGd%2Cplac_gYqfthRUjcI8u1qANae5qiIgqZpl0I%2Cplac_LpfgptgxTvvLwlpFxvcpYf9joLFFcG6e%2Cplac_HcV6MfgC7Up53f51lyYbRBXQPEO7Kc%2Cplac_19ZBIgn3SPdaZElCnO02jMrRh3z9gi6I%2Cplac_vdP2WpEXVkUrUdkPZqkBhJp1SnAlr9e%2Cplac_CE8SN0x4K91nSkuOI0AGLuAVMW8hvfBl%2Cplac_tN4AlcKDMQpQROy4B3hoK8SxZzg4Pct%2Cplac_CaP0Aep3nhqE8O1O2sEp2X73At2P2zPW%2Cplac_PMa3jMkW8dkYMO5kTbtiCGmgp1MFkBI%2Cplac_crRzibqkyebdUJfeeUjoUtERuhRrb%2Cplac_1MPUQhYp4pwMuV92wPAgOL7aUwGU9X%2Cplac_aV17R1BdqUi06q2744fi9xFqmzkl3FfI%2Cplac_IWzW3Z1dPaaMdtBv1QP3cJZiGQyFVdLo&countries%5B%5D=US%2CGB`;
+}
+
+// ---- Source group definitions ----
+
+interface SlotDef {
+  type: FileType;
+  label: string;
+  hint: string;
+  required: boolean;
+}
+
+interface GroupDef {
+  id: string;
+  label: string;
+  emoji: string;
+  color: string;
+  bgColor: string;
+  getUrl: (date: string) => string;
+  slots: SlotDef[];
+}
+
+const SOURCE_GROUPS: GroupDef[] = [
+  {
+    id: "tiktok",
+    label: "TikTok Ads",
+    emoji: "📊",
+    color: "#E8184A",
+    bgColor: "#FFF0F3",
+    getUrl: buildTikTokUrl,
+    slots: [
+      {
+        type: "tiktok",
+        label: "Campaign Report",
+        hint: "luna life limited *Campaign Report*.xlsx",
+        required: false,
+      },
+    ],
+  },
+  {
+    id: "purchasely_subs",
+    label: "Purchasely: Subscriptions",
+    emoji: "📱",
+    color: "#6366F1",
+    bgColor: "#F5F3FF",
+    getUrl: buildPurchaselySubsUrl,
+    slots: [
+      {
+        type: "subscriptions",
+        label: "New Subscriptions & Churn",
+        hint: "*day_new-subscriptions-and-churn.csv",
+        required: false,
+      },
+      {
+        type: "revenue_stores",
+        label: "Revenue by Stores",
+        hint: "*day_revenues-by-stores.csv",
+        required: false,
+      },
+      {
+        type: "revenue_country",
+        label: "Revenue by Country",
+        hint: "*day_revenues-by-country.csv",
+        required: false,
+      },
+      {
+        type: "revenue_plans",
+        label: "Revenue by Plans",
+        hint: "*day_revenues-by-plans.csv",
+        required: false,
+      },
+    ],
+  },
+  {
+    id: "purchasely_conv",
+    label: "Purchasely: Conversions",
+    emoji: "📈",
+    color: "#10B981",
+    bgColor: "#F0FDF8",
+    getUrl: buildPurchaselyConvUrl,
+    slots: [
+      {
+        type: "conversions",
+        label: "Conversions",
+        hint: "Luna - Conversion - *.csv",
+        required: true,
+      },
+      {
+        type: "screenviews",
+        label: "Screen Views",
+        hint: "Luna - Screen Views - *.csv",
+        required: true,
+      },
+    ],
+  },
+];
+
+const ALL_SLOTS = SOURCE_GROUPS.flatMap((g) => g.slots);
 
 export default function UploadPage() {
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -37,132 +187,168 @@ export default function UploadPage() {
     message: string;
     metrics?: Record<string, unknown>;
   } | null>(null);
-  const [dateOverride, setDateOverride] = useState("");
+  const [targetDate, setTargetDate] = useState(getYesterday);
   const router = useRouter();
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    addFiles(droppedFiles);
-  }, []);
-
-  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      addFiles(Array.from(e.target.files));
-    }
-  }, []);
-
-  function addFiles(newFiles: File[]) {
-    const uploads: UploadFile[] = newFiles.map((file) => ({
-      name: file.name,
-      file,
-      type: detectFileType(file.name),
-      status: "ready" as const,
-    }));
-    setFiles((prev) => [...prev, ...uploads]);
+  const addFiles = useCallback(async (newFiles: File[]) => {
+    const processed: UploadFile[] = await Promise.all(
+      newFiles.map(async (file) => {
+        const type = detectFileType(file.name);
+        const detectedDate = await extractFileDate(file, type);
+        return { name: file.name, file, type, detectedDate };
+      })
+    );
+    setFiles((prev) => {
+      const next = [...prev];
+      for (const pf of processed) {
+        if (pf.type !== "unknown") {
+          const idx = next.findIndex((f) => f.type === pf.type);
+          if (idx >= 0) { next[idx] = pf; continue; }
+        }
+        next.push(pf);
+      }
+      return next;
+    });
     setResult(null);
-  }
+  }, []);
 
-  function removeFile(index: number) {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      addFiles(Array.from(e.dataTransfer.files));
+    },
+    [addFiles]
+  );
+
+  const handleFileInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files) addFiles(Array.from(e.target.files));
+    },
+    [addFiles]
+  );
+
+  function removeFile(type: FileType) {
+    setFiles((prev) => prev.filter((f) => f.type !== type));
   }
 
   async function handleProcess() {
     setProcessing(true);
     setResult(null);
-
     try {
       const formData = new FormData();
       for (const upload of files) {
         formData.append("files", upload.file);
         formData.append("types", upload.type);
       }
-      if (dateOverride) {
-        formData.append("date", dateOverride);
-      }
+      formData.append("date", targetDate);
 
-      const res = await fetch("/api/metrics/upload", {
-        method: "POST",
-        body: formData,
-      });
-
+      const res = await fetch("/api/metrics/upload", { method: "POST", body: formData });
       const data = await res.json();
 
       if (res.ok) {
+        const m = data.metrics ?? {};
         setResult({
           success: true,
-          message: `Processed successfully. ${data.metrics?.total_trials ?? 0} trials, £${data.metrics?.total_revenue_gbp?.toFixed(2) ?? "0"} revenue.`,
+          message: `Saved ${data.date}. ${m.total_trials ?? 0} trials · £${Number(m.total_revenue_gbp ?? 0).toFixed(2)} revenue · ${m.tiktok_installs ?? 0} installs`,
           metrics: data.metrics,
         });
+        setFiles([]);
       } else {
-        setResult({
-          success: false,
-          message: data.error || "Processing failed",
-        });
+        setResult({ success: false, message: data.error || "Processing failed" });
       }
-    } catch (err) {
-      setResult({
-        success: false,
-        message: "Network error — check console for details",
-      });
+    } catch {
+      setResult({ success: false, message: "Network error — check console" });
     } finally {
       setProcessing(false);
     }
   }
 
-  const hasAllRequired =
-    files.some((f) => f.type === "conversions") &&
-    files.some((f) => f.type === "screenviews");
+  const filledTypes = new Set(files.map((f) => f.type));
+  const unknownFiles = files.filter((f) => f.type === "unknown");
+  const hasRequired = filledTypes.has("conversions") && filledTypes.has("screenviews");
+  const totalFilled = ALL_SLOTS.filter((s) => filledTypes.has(s.type)).length;
+  const readyFiles = files.filter((f) => f.type !== "unknown");
 
   return (
     <div className="min-h-screen" style={{ background: "#F8F5F0" }}>
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-sm" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+      <header
+        className="bg-white/80 backdrop-blur-sm"
+        style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}
+      >
         <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <a href="/dashboard" className="text-gray-400 hover:text-gray-700 transition-colors font-medium text-sm">
-              ← Dashboard
-            </a>
-          </div>
+          <a
+            href="/dashboard"
+            className="text-gray-400 hover:text-gray-700 transition-colors font-medium text-sm"
+          >
+            ← Dashboard
+          </a>
+          <a
+            href="/data"
+            className="text-gray-400 hover:text-gray-700 transition-colors font-medium text-sm"
+          >
+            View Data →
+          </a>
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Upload Daily Data</h1>
-        <p className="text-gray-500 mb-8">
-          Drop your 5 data files below. They&apos;ll be auto-detected, parsed, and metrics computed instantly.
+      <main className="max-w-3xl mx-auto px-6 py-10">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Upload Daily Data</h1>
+        <p className="text-gray-500 mb-6 text-sm">
+          Click a source to open it, download the files, then drop them here. Auto-detected by
+          filename.{" "}
+          <strong className="text-gray-700">
+            {totalFilled} / {ALL_SLOTS.length}
+          </strong>{" "}
+          files ready.
         </p>
 
-        {/* Optional date override */}
-        <div className="mb-6">
-          <label className="text-sm text-gray-500 font-medium block mb-2">
-            Date override (leave empty for auto-detect from files)
-          </label>
-          <input
-            type="date"
-            value={dateOverride}
-            onChange={(e) => setDateOverride(e.target.value)}
-            className="px-4 py-2 bg-white border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
-            style={{ boxShadow: "var(--shadow-sm)" }}
-          />
+        {/* Target date */}
+        <div className="mb-6 flex items-center gap-4">
+          <div>
+            <label className="text-sm text-gray-500 font-medium block mb-1.5">Data for date</label>
+            <input
+              type="date"
+              value={targetDate}
+              onChange={(e) => setTargetDate(e.target.value)}
+              className="px-4 py-2 bg-white border border-gray-200 rounded-xl text-gray-900 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
+              style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}
+            />
+          </div>
+          <p className="text-xs text-gray-400 mt-5">Source links update automatically to this date</p>
         </div>
 
         {/* Drop zone */}
         <div
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
-          className="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center hover:border-amber-400 hover:bg-amber-50/30 transition-all duration-200 cursor-pointer"
+          className="border-2 border-dashed border-gray-300 rounded-2xl p-8 text-center hover:border-amber-400 hover:bg-amber-50/30 transition-all duration-200 cursor-pointer mb-6"
           onClick={() => document.getElementById("file-input")?.click()}
         >
-          <div className="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center" style={{ background: "linear-gradient(135deg, rgba(245,158,11,0.1), rgba(249,115,22,0.1))" }}>
-            <svg className="w-7 h-7 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+          <div
+            className="w-10 h-10 rounded-2xl mx-auto mb-2 flex items-center justify-center"
+            style={{
+              background:
+                "linear-gradient(135deg, rgba(245,158,11,0.1), rgba(249,115,22,0.1))",
+            }}
+          >
+            <svg
+              className="w-5 h-5 text-amber-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+              />
             </svg>
           </div>
-          <p className="text-gray-700 font-semibold">Drop files here or click to browse</p>
-          <p className="text-gray-400 text-sm mt-1">
-            Accepts: TikTok XLSX, Revenue CSV, Subscriptions CSV, Purchasely CSVs
+          <p className="text-gray-700 font-semibold text-sm">
+            Drop all files here or click to browse
           </p>
+          <p className="text-gray-400 text-xs mt-1">Accepts .csv and .xlsx</p>
           <input
             id="file-input"
             type="file"
@@ -173,56 +359,240 @@ export default function UploadPage() {
           />
         </div>
 
-        {/* File list */}
-        {files.length > 0 && (
-          <div className="mt-6 space-y-3">
-            {files.map((upload, index) => {
-              const fileInfo = FILE_LABELS[upload.type];
-              return (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-3 bg-white rounded-xl"
-                  style={{ boxShadow: "var(--shadow-sm)" }}
+        {/* Source groups */}
+        <div className="space-y-3 mb-6">
+          {SOURCE_GROUPS.map((group) => (
+            <div
+              key={group.id}
+              className="bg-white rounded-2xl overflow-hidden"
+              style={{ boxShadow: "0 1px 8px rgba(0,0,0,0.04)" }}
+            >
+              {/* Group header */}
+              <div
+                className="px-4 py-3 flex items-center justify-between border-b border-gray-100"
+                style={{ background: group.bgColor }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-base">{group.emoji}</span>
+                  <span className="font-semibold text-sm" style={{ color: group.color }}>
+                    {group.label}
+                  </span>
+                </div>
+                <a
+                  href={group.getUrl(targetDate)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg text-white transition-all hover:opacity-90 active:scale-95"
+                  style={{ background: group.color }}
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`px-2 py-1 rounded-lg text-xs font-semibold border ${fileInfo.color}`}
-                    >
-                      {fileInfo.label}
-                    </span>
-                    <span className="text-sm text-gray-700 truncate max-w-xs font-medium">
-                      {upload.name}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => removeFile(index)}
-                    className="text-gray-400 hover:text-red-500 transition-colors text-sm font-medium"
+                  Open{" "}
+                  <svg
+                    className="w-3 h-3"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
                   >
-                    Remove
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                    />
+                  </svg>
+                </a>
+              </div>
+
+              {/* File slots */}
+              {group.slots.map((slot) => {
+                const matched = files.find((f) => f.type === slot.type);
+                const dateOk = matched?.detectedDate === targetDate;
+                const dateMismatch =
+                  matched && matched.detectedDate && matched.detectedDate !== targetDate;
+                const dateUnknown = matched && matched.detectedDate === null;
+
+                return (
+                  <div
+                    key={slot.type}
+                    className={`flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0 transition-colors ${
+                      matched && dateOk
+                        ? "bg-emerald-50/40"
+                        : dateMismatch
+                        ? "bg-amber-50/40"
+                        : ""
+                    }`}
+                  >
+                    {/* Status indicator */}
+                    <div
+                      className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
+                        matched && dateOk
+                          ? "bg-emerald-100"
+                          : dateMismatch
+                          ? "bg-amber-100"
+                          : "bg-gray-100"
+                      }`}
+                    >
+                      {matched && dateOk ? (
+                        <svg
+                          className="w-3 h-3 text-emerald-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={3}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : dateMismatch ? (
+                        <svg
+                          className="w-3 h-3 text-amber-500"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2.5}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                          />
+                        </svg>
+                      ) : (
+                        <div className="w-2 h-2 rounded-full bg-gray-300" />
+                      )}
+                    </div>
+
+                    {/* Label + info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-700">{slot.label}</span>
+                        {slot.required && !matched && (
+                          <span className="text-[10px] text-amber-600 font-bold uppercase tracking-wide bg-amber-50 px-1.5 py-0.5 rounded">
+                            required
+                          </span>
+                        )}
+                      </div>
+                      {matched ? (
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <p className="text-xs text-gray-500 truncate max-w-[220px]">
+                            {matched.name}
+                          </p>
+                          {dateMismatch && (
+                            <span className="text-[10px] text-amber-600 font-semibold flex-shrink-0">
+                              ⚠ file date {matched.detectedDate} ≠ {targetDate}
+                            </span>
+                          )}
+                          {dateUnknown && (
+                            <span className="text-[10px] text-gray-400 flex-shrink-0">
+                              date undetected
+                            </span>
+                          )}
+                          {dateOk && (
+                            <span className="text-[10px] text-emerald-600 font-semibold flex-shrink-0">
+                              ✓ {matched.detectedDate}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400 mt-0.5 font-mono">{slot.hint}</p>
+                      )}
+                    </div>
+
+                    {/* Remove button */}
+                    {matched && (
+                      <button
+                        onClick={() => removeFile(slot.type)}
+                        className="text-gray-300 hover:text-red-400 transition-colors text-sm flex-shrink-0 px-1 leading-none"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {/* Unknown files */}
+          {unknownFiles.length > 0 && (
+            <div
+              className="bg-white rounded-2xl overflow-hidden"
+              style={{ boxShadow: "0 1px 8px rgba(0,0,0,0.04)" }}
+            >
+              <div className="px-4 py-2 border-b border-gray-100 bg-gray-50">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                  Unrecognised files
+                </span>
+              </div>
+              {unknownFiles.map((f, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0"
+                >
+                  <div className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-[9px] text-amber-600 font-bold">?</span>
+                  </div>
+                  <p className="flex-1 text-xs text-gray-500 truncate">{f.name}</p>
+                  <button
+                    onClick={() =>
+                      setFiles((prev) => {
+                        let count = 0;
+                        return prev.filter((x) => {
+                          if (x.type === "unknown") {
+                            if (count === i) { count++; return false; }
+                            count++;
+                          }
+                          return true;
+                        });
+                      })
+                    }
+                    className="text-gray-300 hover:text-red-400 transition-colors text-sm px-1"
+                  >
+                    ✕
                   </button>
                 </div>
-              );
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
 
-        {/* Status messages */}
-        {files.length > 0 && !hasAllRequired && (
-          <p className="mt-4 text-amber-600 text-sm font-medium">
-            At minimum, Purchasely Conversions and Screen Views CSVs are required.
-            TikTok, Revenue, and Subscriptions are optional but recommended.
+        {/* Warning */}
+        {files.length > 0 && !hasRequired && (
+          <p className="mb-4 text-amber-600 text-sm font-medium flex items-center gap-2">
+            <svg
+              className="w-4 h-4 flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+              />
+            </svg>
+            Conversions and Screen Views are required before processing.
           </p>
         )}
 
         {/* Process button */}
-        {files.length > 0 && (
+        {readyFiles.length > 0 && (
           <button
             onClick={handleProcess}
-            disabled={processing}
-            className="mt-6 w-full py-3 rounded-xl font-semibold text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ background: processing ? "#9CA3AF" : "linear-gradient(135deg, #F59E0B, #F97316)" }}
+            disabled={processing || !hasRequired}
+            className="w-full py-3.5 rounded-xl font-semibold text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              background:
+                processing || !hasRequired
+                  ? "#9CA3AF"
+                  : "linear-gradient(135deg, #F59E0B, #F97316)",
+              boxShadow:
+                !processing && hasRequired ? "0 4px 14px rgba(245,158,11,0.35)" : "none",
+            }}
           >
-            {processing ? "Processing..." : `Process ${files.length} File${files.length !== 1 ? "s" : ""}`}
+            {processing
+              ? "Processing..."
+              : `Process ${readyFiles.length} file${readyFiles.length !== 1 ? "s" : ""} for ${targetDate}`}
           </button>
         )}
 
@@ -235,7 +605,7 @@ export default function UploadPage() {
                 : "bg-red-50 border-red-200 text-red-700"
             }`}
           >
-            <p className="font-semibold">{result.success ? "Success" : "Error"}</p>
+            <p className="font-semibold">{result.success ? "✓ Data saved" : "Error"}</p>
             <p className="text-sm mt-1">{result.message}</p>
             {result.success && (
               <button
@@ -248,253 +618,7 @@ export default function UploadPage() {
             )}
           </div>
         )}
-
-        {/* ---- HISTORICAL IMPORT SECTION ---- */}
-        <div className="mt-16 pt-8 border-t border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Import Historical Data</h2>
-          <p className="text-gray-500 mb-6 text-sm">
-            Upload your Google Sheet export (.xlsx) to backfill all historical metrics and activity notes into the dashboard.
-          </p>
-          <HistoricalImport />
-        </div>
-
-        {/* ---- REVENUE SEGMENTS IMPORT ---- */}
-        <div className="mt-16 pt-8 border-t border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900 mb-2">Import Revenue Segments</h2>
-          <p className="text-gray-500 mb-6 text-sm">
-            Upload Purchasely revenue CSVs to populate the segmented revenue chart. Accepts: revenues-by-stores, revenues-by-country, revenues-by-plans.
-          </p>
-          <RevenueSegmentImport />
-        </div>
       </main>
-    </div>
-  );
-}
-
-function HistoricalImport() {
-  const [file, setFile] = useState<File | null>(null);
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{
-    success: boolean;
-    message: string;
-  } | null>(null);
-  const router = useRouter();
-
-  async function handleImport() {
-    if (!file) return;
-    setImporting(true);
-    setImportResult(null);
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch("/api/import", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setImportResult({
-          success: true,
-          message: `Imported ${data.metrics?.imported ?? 0} days of metrics and ${data.activities?.imported ?? 0} activity entries.${
-            data.metrics?.errors?.length ? ` (${data.metrics.errors.length} metric errors)` : ""
-          }${data.activities?.errors?.length ? ` (${data.activities.errors.length} activity errors)` : ""}`,
-        });
-      } else {
-        setImportResult({
-          success: false,
-          message: data.error || "Import failed",
-        });
-      }
-    } catch {
-      setImportResult({
-        success: false,
-        message: "Network error during import",
-      });
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex items-center gap-4">
-        <label className="flex-1">
-          <div className="flex items-center gap-3 p-4 bg-white rounded-xl cursor-pointer hover:shadow-md transition-all duration-200" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-sm text-gray-700 font-semibold">
-                {file ? file.name : "Choose Google Sheet export (.xlsx)"}
-              </p>
-              <p className="text-xs text-gray-400">
-                {file ? `${(file.size / 1024).toFixed(1)} KB` : "File should have columns: Date, TikTok Installs, All Trials, etc."}
-              </p>
-            </div>
-          </div>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={(e) => {
-              setFile(e.target.files?.[0] ?? null);
-              setImportResult(null);
-            }}
-            className="hidden"
-          />
-        </label>
-        <button
-          onClick={handleImport}
-          disabled={!file || importing}
-          className="px-6 py-4 rounded-xl font-semibold text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ background: !file || importing ? "#9CA3AF" : "linear-gradient(135deg, #F59E0B, #F97316)" }}
-        >
-          {importing ? "Importing..." : "Import"}
-        </button>
-      </div>
-
-      {importResult && (
-        <div
-          className={`mt-4 p-4 rounded-2xl border ${
-            importResult.success
-              ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-              : "bg-red-50 border-red-200 text-red-700"
-          }`}
-        >
-          <p className="font-semibold">{importResult.success ? "Import Complete" : "Import Failed"}</p>
-          <p className="text-sm mt-1">{importResult.message}</p>
-          {importResult.success && (
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="mt-3 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
-              style={{ background: "linear-gradient(135deg, #10B981, #059669)" }}
-            >
-              View Dashboard →
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RevenueSegmentImport() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{
-    success: boolean;
-    message: string;
-  } | null>(null);
-  const router = useRouter();
-
-  async function handleImport() {
-    if (files.length === 0) return;
-    setImporting(true);
-    setImportResult(null);
-
-    try {
-      const formData = new FormData();
-      for (const f of files) {
-        formData.append("files", f);
-      }
-
-      const res = await fetch("/api/import/revenue", {
-        method: "POST",
-        body: formData,
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        const parts = Object.entries(data.results as Record<string, { rows: number; error?: string }>)
-          .map(([key, val]) => val.error ? `${key}: ${val.error}` : `${key}: ${val.rows} days`)
-          .join(", ");
-        setImportResult({
-          success: true,
-          message: `Revenue segments imported. ${parts}`,
-        });
-      } else {
-        setImportResult({
-          success: false,
-          message: data.error || "Import failed",
-        });
-      }
-    } catch {
-      setImportResult({
-        success: false,
-        message: "Network error during import",
-      });
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex items-center gap-4">
-        <label className="flex-1">
-          <div className="flex items-center gap-3 p-4 bg-white rounded-xl cursor-pointer hover:shadow-md transition-all duration-200" style={{ boxShadow: "var(--shadow-sm)" }}>
-            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
-              <svg className="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-sm text-gray-700 font-semibold">
-                {files.length > 0 ? `${files.length} file${files.length > 1 ? "s" : ""} selected` : "Choose Purchasely revenue CSVs"}
-              </p>
-              <p className="text-xs text-gray-400">
-                {files.length > 0 ? files.map((f) => f.name).join(", ") : "revenues-by-stores, revenues-by-country, revenues-by-plans"}
-              </p>
-            </div>
-          </div>
-          <input
-            type="file"
-            accept=".csv"
-            multiple
-            onChange={(e) => {
-              setFiles(e.target.files ? Array.from(e.target.files) : []);
-              setImportResult(null);
-            }}
-            className="hidden"
-          />
-        </label>
-        <button
-          onClick={handleImport}
-          disabled={files.length === 0 || importing}
-          className="px-6 py-4 rounded-xl font-semibold text-white transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ background: files.length === 0 || importing ? "#9CA3AF" : "linear-gradient(135deg, #3B82F6, #2563EB)" }}
-        >
-          {importing ? "Importing..." : "Import"}
-        </button>
-      </div>
-
-      {importResult && (
-        <div
-          className={`mt-4 p-4 rounded-2xl border ${
-            importResult.success
-              ? "bg-emerald-50 border-emerald-200 text-emerald-700"
-              : "bg-red-50 border-red-200 text-red-700"
-          }`}
-        >
-          <p className="font-semibold">{importResult.success ? "Import Complete" : "Import Failed"}</p>
-          <p className="text-sm mt-1">{importResult.message}</p>
-          {importResult.success && (
-            <button
-              onClick={() => router.push("/dashboard")}
-              className="mt-3 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all"
-              style={{ background: "linear-gradient(135deg, #10B981, #059669)" }}
-            >
-              View Dashboard →
-            </button>
-          )}
-        </div>
-      )}
     </div>
   );
 }

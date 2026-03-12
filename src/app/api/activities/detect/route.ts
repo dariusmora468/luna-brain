@@ -58,6 +58,18 @@ export async function POST() {
     return NextResponse.json({ detected: 0, inserted: 0, message: "Not enough data to detect actions (need 8+ days)" });
   }
 
+  // Fetch all existing activities (manual + auto-detected) to avoid duplicates.
+  // This prevents Refresh from re-adding events that were already manually logged,
+  // and stops it from restoring auto-detected events that were manually deleted.
+  const { data: existingActivities } = await supabase
+    .from("activities")
+    .select("date, title")
+    .eq("client_id", "luna");
+
+  const existingKeys = new Set(
+    (existingActivities ?? []).map((a: { date: string; title: string }) => `${a.date}::${a.title}`)
+  );
+
   const rows = metrics as MetricsRow[];
   const detected: DetectedActivity[] = [];
 

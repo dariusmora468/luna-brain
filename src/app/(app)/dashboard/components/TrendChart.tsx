@@ -32,6 +32,7 @@ const CATEGORY_ICONS: Record<string, string> = {
 
 interface Props {
   title: string;
+  subtitle?: string;
   data: DailyMetrics[];
   dataKey: keyof DailyMetrics;
   secondaryDataKey?: keyof DailyMetrics;
@@ -78,7 +79,7 @@ function ActivityDot(activityMap: Map<string, Activity[]>) {
 }
 
 export default function TrendChart({
-  title, data, dataKey, secondaryDataKey, secondaryLabel,
+  title, subtitle, data, dataKey, secondaryDataKey, secondaryLabel,
   color, secondaryColor, onDayClick, selectedDate, activities = [],
 }: Props) {
   const activityMap = new Map<string, Activity[]>();
@@ -103,7 +104,10 @@ export default function TrendChart({
   return (
     <div className="bg-white rounded-2xl p-5" style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)" }}>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700">{title}</h3>
+          {subtitle && <p className="text-[10px] text-gray-400 font-medium mt-0.5">{subtitle}</p>}
+        </div>
         <div className="flex items-center gap-3 text-[10px] font-medium">
           {secondaryDataKey && (
             <>
