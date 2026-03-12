@@ -3,24 +3,16 @@ import { NextResponse } from "next/server";
 
 interface MetricsRow {
   date: string;
-  tiktok_spend_gbp: number;
-  tiktok_installs: number;
-  total_trials: number;
-  onboarding_trials: number;
-  non_onboarding_trials: number;
-  new_subscriptions: number;
-  churn: number;
-  total_revenue_gbp: number;
-  us_trials: number;
-  gb_trials: number;
-  us_revenue_gbp: number;
-  gb_revenue_gbp: number;
-  monthly_trials: number;
-  annual_full_trials: number;
-  annual_discount_trials: number;
-  cost_per_install_gbp: number | null;
-  install_to_trial_cr: number | null;
-  ab_test_significance: number | null;
+  tiktok_spend_gbp: number | null;
+  parent_spend_gbp: number | null;
+  teen_spend_gbp: number | null;
+  us_trials: number | null;
+  gb_trials: number | null;
+  parent_trials: number | null;
+  teen_trials: number | null;
+  monthly_trials: number | null;
+  annual_full_trials: number | null;
+  annual_discount_trials: number | null;
 }
 
 interface DetectedActivity {
@@ -34,14 +26,27 @@ interface DetectedActivity {
   created_by: string | null;
 }
 
-// POST /api/activities/detect — scan metrics and auto-generate timeline activities
+// POST /api/activities/detect — wipe old auto-detected activities and re-derive from current data
 export async function POST() {
   const supabase = createServerClient();
+
+  // Wipe all previously auto-detected activities — makes every run idempotent
+  const { error: wipeError } = await supabase
+    .from("activities")
+    .delete()
+    .eq("client_id", "luna")
+    .eq("auto_detected", true);
+
+  if (wipeError) {
+    return NextResponse.json({ error: wipeError.message }, { status: 500 });
+  }
 
   // Fetch all metrics ordered by date ascending
   const { data: metrics, error: metricsError } = await supabase
     .from("metrics")
-    .select("*")
+    .select(
+      "date, tiktok_spend_gbp, parent_spend_gbp, teen_spend_gbp, us_trials, gb_trials, parent_trials, teen_trials, monthly_trials, annual_full_trials, annual_discount_trials"
+    )
     .eq("client_id", "luna")
     .order("date", { ascending: true });
 
@@ -49,167 +54,208 @@ export async function POST() {
     return NextResponse.json({ error: metricsError.message }, { status: 500 });
   }
 
-  if (!metrics || metrics.length < 2) {
-    return NextResponse.json({ detected: 0, message: "Not enough data to detect changes" });
+  if (!metrics || metrics.length < 8) {
+    return NextResponse.json({ detected: 0, inserted: 0, message: "Not enough data to detect actions (need 8+ days)" });
   }
 
-  // Fetch existing auto-detected activities to avoid duplicates
-  const { data: existingActivities } = await supabase
-    .from("activities")
-    .select("date, title")
-    .eq("client_id", "luna")
-    .eq("auto_detected", true);
-
-  const existingKeys = new Set(
-    (existingActivities ?? []).map((a: { date: string; title: string }) => `${a.date}::${a.title}`)
-  );
-
+  const rows = metrics as MetricsRow[];
   const detected: DetectedActivity[] = [];
 
-  for (let i = 1; i < metrics.length; i++) {
-    const prev = metrics[i - 1] as MetricsRow;
-    const curr = metrics[i] as MetricsRow;
-    const date = curr.date;
+  // ── helpers ──────────────────────────────────────────────────────────────
 
-    // --- CAMPAIGN DETECTION ---
+  const v = (row: MetricsRow, field: keyof MetricsRow): number =>
+    (row[field] as number | null) ?? 0;
 
-    // Spend started (was 0 or null, now > 0)
-    if ((prev.tiktok_spend_gbp ?? 0) === 0 && (curr.tiktok_spend_gbp ?? 0) > 0) {
-      detected.push(makeActivity(date, "campaign", "TikTok ad spend started", `£${num(curr.tiktok_spend_gbp)} spent, ${curr.tiktok_installs} installs`));
+  function firstAppearance(
+    i: number,
+    field: keyof MetricsRow,
+    threshold = 0
+  ): boolean {
+    if (i < 7) return false;
+    const today = v(rows[i], field);
+    if (today <= threshold) return false;
+    for (let j = i - 7; j < i; j++) {
+      if (v(rows[j], field) > threshold) return false;
     }
+    return true;
+  }
 
-    // Spend stopped (was > 0, now 0)
-    if ((prev.tiktok_spend_gbp ?? 0) > 0 && (curr.tiktok_spend_gbp ?? 0) === 0) {
-      detected.push(makeActivity(date, "campaign", "TikTok ad spend paused", `Previous day: £${num(prev.tiktok_spend_gbp)}`));
-    }
+  function sustainedPause(
+    i: number,
+    field: keyof MetricsRow,
+    threshold = 0
+  ): boolean {
+    // days[i-2], [i-1], [i] all zero — and [i-3] was active
+    if (i < 3) return false;
+    if (v(rows[i], field) > threshold) return false;
+    if (v(rows[i - 1], field) > threshold) return false;
+    if (v(rows[i - 2], field) > threshold) return false;
+    return v(rows[i - 3], field) > threshold;
+  }
 
-    // Big spend change (>80% increase or >50% decrease, both days > £5)
-    const prevSpend = prev.tiktok_spend_gbp ?? 0;
-    const currSpend = curr.tiktok_spend_gbp ?? 0;
-    if (prevSpend > 5 && currSpend > 5) {
-      const spendChange = ((currSpend - prevSpend) / prevSpend) * 100;
-      if (spendChange > 80) {
-        detected.push(makeActivity(date, "campaign", `Ad spend surged +${Math.round(spendChange)}%`, `£${num(prevSpend)} → £${num(currSpend)}`));
-      } else if (spendChange < -50) {
-        detected.push(makeActivity(date, "campaign", `Ad spend dropped ${Math.round(spendChange)}%`, `£${num(prevSpend)} → £${num(currSpend)}`));
-      }
-    }
+  function sustainedRestart(
+    i: number,
+    field: keyof MetricsRow,
+    threshold = 0
+  ): boolean {
+    if (i < 3) return false;
+    if (v(rows[i], field) <= threshold) return false;
+    return (
+      v(rows[i - 1], field) <= threshold &&
+      v(rows[i - 2], field) <= threshold &&
+      v(rows[i - 3], field) <= threshold
+    );
+  }
 
-    // Install volume spike (>2x, both > 10)
-    if (prev.tiktok_installs > 10 && curr.tiktok_installs > prev.tiktok_installs * 2) {
-      detected.push(makeActivity(date, "campaign", `Install spike: ${curr.tiktok_installs} installs (${Math.round((curr.tiktok_installs / prev.tiktok_installs - 1) * 100)}% increase)`, null));
-    }
-
-    // --- MARKET DETECTION ---
-
-    // First US trials
-    if ((prev.us_trials ?? 0) === 0 && (curr.us_trials ?? 0) > 0) {
-      detected.push(makeActivity(date, "growth", `First US trials: ${curr.us_trials}`, "US market generating conversions"));
-    }
-
-    // First US revenue
-    if ((prev.us_revenue_gbp ?? 0) === 0 && (curr.us_revenue_gbp ?? 0) > 0) {
-      detected.push(makeActivity(date, "growth", `First US revenue: £${num(curr.us_revenue_gbp)}`, null));
-    }
-
-    // --- CONVERSION DETECTION ---
-
-    // Trial spike (>2x, both days > 2)
-    if (prev.total_trials > 2 && curr.total_trials > 2 && curr.total_trials > prev.total_trials * 2) {
-      detected.push(makeActivity(date, "growth", `Trial spike: ${curr.total_trials} trials (was ${prev.total_trials})`, null));
-    }
-
-    // Non-onboarding trials appeared or spiked
-    if ((prev.non_onboarding_trials ?? 0) === 0 && (curr.non_onboarding_trials ?? 0) >= 2) {
-      detected.push(makeActivity(date, "growth", `In-app conversions: ${curr.non_onboarding_trials} non-onboarding trials`, "Users converting from in-app paywalls, not just onboarding"));
-    }
-
-    // Conversion rate significant change (>1 ppt, both days have installs > 20)
-    const prevCR = prev.install_to_trial_cr ?? 0;
-    const currCR = curr.install_to_trial_cr ?? 0;
-    if (prev.tiktok_installs > 20 && curr.tiktok_installs > 20) {
-      const crDiff = currCR - prevCR;
-      if (crDiff > 1) {
-        detected.push(makeActivity(date, "growth", `Conversion rate up: ${num(prevCR)}% → ${num(currCR)}%`, `+${num(crDiff)} percentage points`));
-      } else if (crDiff < -1) {
-        detected.push(makeActivity(date, "growth", `Conversion rate down: ${num(prevCR)}% → ${num(currCR)}%`, `${num(crDiff)} percentage points`));
-      }
-    }
-
-    // --- SUBSCRIPTION DETECTION ---
-
-    // First subscriber
-    if ((prev.new_subscriptions ?? 0) === 0 && (curr.new_subscriptions ?? 0) > 0) {
-      detected.push(makeActivity(date, "growth", `New subscribers: ${curr.new_subscriptions}`, null));
-    }
-
-    // Churn spike (> 2 and > 2x previous)
-    if ((prev.churn ?? 0) > 0 && (curr.churn ?? 0) > 2 && curr.churn > prev.churn * 2) {
-      detected.push(makeActivity(date, "growth", `Churn spike: ${curr.churn} (was ${prev.churn})`, null));
-    }
-
-    // --- REVENUE DETECTION ---
-
-    // Revenue spike (>2x, both > £5)
-    const prevRev = prev.total_revenue_gbp ?? 0;
-    const currRev = curr.total_revenue_gbp ?? 0;
-    if (prevRev > 5 && currRev > prevRev * 2) {
-      detected.push(makeActivity(date, "growth", `Revenue spike: £${num(currRev)} (was £${num(prevRev)})`, null));
-    }
-
-    // --- A/B TEST DETECTION ---
-
-    // Significance reached
-    const prevSig = prev.ab_test_significance ?? 0;
-    const currSig = curr.ab_test_significance ?? 0;
-    if (prevSig < 95 && currSig >= 95) {
-      detected.push(makeActivity(date, "paywall", `A/B test reached ${num(currSig)}% significance`, "Statistical significance threshold reached"));
-    }
-
-    // --- CPI DETECTION ---
-
-    // CPI significant change (both have CPI, change > 30%)
-    const prevCPI = prev.cost_per_install_gbp;
-    const currCPI = curr.cost_per_install_gbp;
-    if (prevCPI && currCPI && prevCPI > 0.05 && currCPI > 0.05) {
-      const cpiChange = ((currCPI - prevCPI) / prevCPI) * 100;
-      if (cpiChange < -30) {
-        detected.push(makeActivity(date, "campaign", `CPI improved: £${num(prevCPI)} → £${num(currCPI)}`, `${Math.round(cpiChange)}% decrease`));
-      } else if (cpiChange > 50) {
-        detected.push(makeActivity(date, "campaign", `CPI increased: £${num(prevCPI)} → £${num(currCPI)}`, `+${Math.round(cpiChange)}% increase`));
-      }
+  // ── budget level change (non-overlapping 7-day windows) ──────────────────
+  // Run at week boundaries: index 7, 14, 21, 28 …
+  function checkBudgetChange(i: number, field: keyof MetricsRow, label: string): void {
+    if (i < 7 || (i % 7) !== 0) return;
+    const prev7: number[] = rows.slice(i - 7, i).map((r) => v(r, field));
+    const curr7: number[] = rows.slice(i, i + 7).map((r) => v(r, field));
+    if (curr7.length < 7) return;
+    const prevAvg = prev7.reduce((a, b) => a + b, 0) / 7;
+    const currAvg = curr7.reduce((a, b) => a + b, 0) / 7;
+    if (prevAvg < 5 || currAvg < 5) return; // both windows need >£5/day avg
+    const ratio = currAvg / prevAvg;
+    if (ratio > 1.40) {
+      detected.push(
+        makeActivity(
+          rows[i].date,
+          "campaign",
+          `Increased ${label} budget (~${ratio.toFixed(1)}x increase)`,
+          `7-day avg: £${prevAvg.toFixed(0)}/day → £${currAvg.toFixed(0)}/day`
+        )
+      );
+    } else if (ratio < 0.60) {
+      detected.push(
+        makeActivity(
+          rows[i].date,
+          "campaign",
+          `Reduced ${label} budget (~${(1 / ratio).toFixed(1)}x reduction)`,
+          `7-day avg: £${prevAvg.toFixed(0)}/day → £${currAvg.toFixed(0)}/day`
+        )
+      );
     }
   }
 
-  // Filter out duplicates
-  const newActivities = detected.filter(
-    (a) => !existingKeys.has(`${a.date}::${a.title}`)
-  );
+  // ── main scan ─────────────────────────────────────────────────────────────
 
-  // Insert new activities
+  for (let i = 0; i < rows.length; i++) {
+    const date = rows[i].date;
+
+    // ── TikTok overall ────────────────────────────────────────────────────
+
+    // All ads restarted (3+ zeros → non-zero)
+    if (sustainedRestart(i, "tiktok_spend_gbp")) {
+      // only fire restart if NOT a first-appearance (i.e. was previously active before the gap)
+      let everActive = false;
+      for (let j = 0; j < i - 3; j++) {
+        if (v(rows[j], "tiktok_spend_gbp") > 0) { everActive = true; break; }
+      }
+      if (everActive) {
+        detected.push(makeActivity(date, "campaign", "Restarted TikTok advertising", null));
+      }
+    }
+
+    // All ads paused (3 consecutive zeros after active)
+    if (sustainedPause(i, "tiktok_spend_gbp")) {
+      detected.push(makeActivity(rows[i - 2].date, "campaign", "Paused all TikTok advertising", null));
+    }
+
+    // Budget level changes for total TikTok spend
+    checkBudgetChange(i, "tiktok_spend_gbp", "TikTok");
+
+    // ── Parent campaigns ──────────────────────────────────────────────────
+
+    if (firstAppearance(i, "parent_spend_gbp")) {
+      detected.push(makeActivity(date, "campaign", "Started running Parent TikTok campaigns", null));
+    }
+    if (sustainedPause(i, "parent_spend_gbp")) {
+      detected.push(makeActivity(rows[i - 2].date, "campaign", "Paused Parent TikTok campaigns", null));
+    }
+    checkBudgetChange(i, "parent_spend_gbp", "Parent campaign");
+
+    // ── Teen campaigns ────────────────────────────────────────────────────
+
+    if (firstAppearance(i, "teen_spend_gbp")) {
+      detected.push(makeActivity(date, "campaign", "Started running Teen TikTok campaigns", null));
+    }
+    if (sustainedPause(i, "teen_spend_gbp")) {
+      detected.push(makeActivity(rows[i - 2].date, "campaign", "Paused Teen TikTok campaigns", null));
+    }
+    checkBudgetChange(i, "teen_spend_gbp", "Teen campaign");
+
+    // ── Market / audience targeting ───────────────────────────────────────
+
+    if (firstAppearance(i, "us_trials")) {
+      detected.push(makeActivity(date, "campaign", "Started targeting US audience", null));
+    }
+    if (sustainedPause(i, "us_trials")) {
+      detected.push(makeActivity(rows[i - 2].date, "campaign", "Paused US market targeting", null));
+    }
+
+    if (firstAppearance(i, "gb_trials")) {
+      detected.push(makeActivity(date, "campaign", "Started targeting UK audience", null));
+    }
+    if (sustainedPause(i, "gb_trials")) {
+      detected.push(makeActivity(rows[i - 2].date, "campaign", "Paused UK market targeting", null));
+    }
+
+    if (firstAppearance(i, "parent_trials")) {
+      detected.push(makeActivity(date, "campaign", "Started targeting Parent audience", null));
+    }
+    if (firstAppearance(i, "teen_trials")) {
+      detected.push(makeActivity(date, "campaign", "Started targeting Teen audience", null));
+    }
+
+    // ── Paywall / plan changes ────────────────────────────────────────────
+
+    if (firstAppearance(i, "annual_discount_trials")) {
+      detected.push(makeActivity(date, "paywall", "Launched discounted annual plan", null));
+    }
+    if (sustainedPause(i, "annual_discount_trials")) {
+      detected.push(makeActivity(rows[i - 2].date, "paywall", "Removed discounted annual plan", null));
+    }
+
+    if (firstAppearance(i, "monthly_trials")) {
+      detected.push(makeActivity(date, "paywall", "Enabled monthly subscription plan", null));
+    }
+
+    if (firstAppearance(i, "annual_full_trials")) {
+      detected.push(makeActivity(date, "paywall", "Enabled full-price annual plan", null));
+    }
+  }
+
+  // Insert all detected activities
   let insertedCount = 0;
-  if (newActivities.length > 0) {
+  if (detected.length > 0) {
     const { error: insertError } = await supabase
       .from("activities")
-      .insert(newActivities);
+      .insert(detected);
 
     if (insertError) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
-    insertedCount = newActivities.length;
+    insertedCount = detected.length;
   }
 
   return NextResponse.json({
     detected: detected.length,
     inserted: insertedCount,
-    skipped: detected.length - insertedCount,
-    message: insertedCount > 0
-      ? `Added ${insertedCount} new activities to the timeline`
-      : "No new activities detected (all already logged)",
+    message:
+      insertedCount > 0
+        ? `Wiped old entries and added ${insertedCount} action-based activities`
+        : "No actions detected in current data",
   });
 }
 
-function makeActivity(date: string, category: string, title: string, description: string | null): DetectedActivity {
+function makeActivity(
+  date: string,
+  category: string,
+  title: string,
+  description: string | null
+): DetectedActivity {
   return {
     client_id: "luna",
     date,
@@ -220,9 +266,4 @@ function makeActivity(date: string, category: string, title: string, description
     source: "metrics_scan",
     created_by: null,
   };
-}
-
-function num(val: number | null | undefined): string {
-  if (val === null || val === undefined) return "0";
-  return Number(val).toFixed(2);
 }
