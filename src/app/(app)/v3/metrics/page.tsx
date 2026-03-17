@@ -30,7 +30,9 @@ function emptyRow(dateStr: string): DailyActualsRow {
   };
 }
 
-// Build every date from 2026-01-01 to today (UTC)
+// Build every date from 2026-01-01 to today (UTC).
+// Called on every page load (force-dynamic), so a new row
+// for the current day appears automatically each morning.
 function buildDateScaffold(): DailyActualsRow[] {
   const rows: DailyActualsRow[] = [];
   const cur = new Date(Date.UTC(2026, 0, 1));
