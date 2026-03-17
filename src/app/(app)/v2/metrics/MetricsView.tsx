@@ -261,126 +261,141 @@ function SourceBadge({ col }: { col: ColumnDef }) {
   );
 }
 
-// ── Upload Zone ────────────────────────────────────────────────────────────────
+// ── Upload Zone (multi-file) ───────────────────────────────────────────────────
 
-interface UploadState {
-  status: "idle" | "parsing" | "confirm" | "applied" | "error";
-  report?: ParsedReport;
-  error?: string;
-}
+type FileResult =
+  | { status: "parsing"; name: string }
+  | { status: "ready";   name: string; report: ParsedReport }
+  | { status: "error";   name: string; error: string };
 
-function ReportUploadZone({
-  onApply,
-}: {
-  onApply: (report: ParsedReport) => void;
-}) {
-  const [state, setState] = useState<UploadState>({ status: "idle" });
+type UploadPhase = "idle" | "reviewing" | "applied";
+
+function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => void }) {
+  const [phase, setPhase] = useState<UploadPhase>("idle");
+  const [files, setFiles] = useState<FileResult[]>([]);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = useCallback(async (file: File) => {
-    if (!file.name.endsWith(".xlsx") && !file.name.endsWith(".xls")) {
-      setState({ status: "error", error: "Only .xlsx files are supported." });
-      return;
-    }
-    setState({ status: "parsing" });
-    try {
-      const report = await parseTikTokReport(file);
-      if (!report) {
-        setState({ status: "error", error: "Could not recognise this report. Expected a TikTok Campaign Report (.xlsx) with a date in the filename." });
-        return;
-      }
-      setState({ status: "confirm", report });
-    } catch (e) {
-      setState({ status: "error", error: String(e) });
-    }
+  const processFiles = useCallback(async (rawFiles: File[]) => {
+    const xlsx = rawFiles.filter((f) => f.name.endsWith(".xlsx") || f.name.endsWith(".xls"));
+    if (!xlsx.length) return;
+
+    // Show parsing state immediately
+    setFiles(xlsx.map((f) => ({ status: "parsing", name: f.name })));
+    setPhase("reviewing");
+
+    // Parse all in parallel
+    const results = await Promise.all(
+      xlsx.map(async (f): Promise<FileResult> => {
+        try {
+          const report = await parseTikTokReport(f);
+          if (!report) return { status: "error", name: f.name, error: "Unrecognised format — needs a date in filename and Campaign Report columns." };
+          return { status: "ready", name: f.name, report };
+        } catch (e) {
+          return { status: "error", name: f.name, error: String(e) };
+        }
+      })
+    );
+    setFiles(results);
   }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  }, [handleFile]);
+    processFiles(Array.from(e.dataTransfer.files));
+  }, [processFiles]);
 
-  if (state.status === "confirm" && state.report) {
-    const r = state.report;
-    return (
-      <div className="mb-5 bg-white border border-violet-200 rounded-xl p-4 shadow-sm">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-violet-600" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-gray-900">TikTok Campaign Report detected</p>
-            <p className="text-xs text-gray-500 mt-0.5">Date: <span className="font-medium text-gray-700">{r.date}</span></p>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <div className="bg-gray-50 rounded-lg px-3 py-2">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wide">TikTok Spend</p>
-                <p className="text-sm font-bold text-gray-900">{fmtGbp(r.tiktok_spend)}</p>
-              </div>
-              <div className="bg-gray-50 rounded-lg px-3 py-2">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wide">Teen Spend</p>
-                <p className="text-sm font-bold text-gray-900">{fmtGbp(r.teen_spend)}</p>
-              </div>
-              <div className="bg-gray-50 rounded-lg px-3 py-2">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wide">Parent Spend</p>
-                <p className="text-sm font-bold text-gray-900">{fmtGbp(r.parent_spend)}</p>
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                onClick={() => {
-                  onApply(r);
-                  setState({ status: "applied", report: r });
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all"
-                style={{ background: "linear-gradient(135deg, #8B5CF6, #6D28D9)" }}
-              >
-                Apply to {r.date}
-              </button>
-              <button
-                onClick={() => setState({ status: "idle" })}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-all"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const readyReports = files.filter((f): f is Extract<FileResult, { status: "ready" }> => f.status === "ready");
+  const isParsing = files.some((f) => f.status === "parsing");
 
-  if (state.status === "applied" && state.report) {
+  // ── Applied summary ──
+  if (phase === "applied") {
     return (
       <div className="mb-5 bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-3">
         <svg className="w-4 h-4 text-green-600 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
         </svg>
         <p className="text-sm text-green-800">
-          <span className="font-semibold">TikTok data applied</span> — {state.report.date}: {fmtGbp(state.report.tiktok_spend)} total spend filled in.
+          <span className="font-semibold">{readyReports.length} report{readyReports.length !== 1 ? "s" : ""} applied</span>
+          {" — "}
+          {readyReports.map((f) => f.report.date).sort().join(", ")}
         </p>
-        <button
-          onClick={() => setState({ status: "idle" })}
-          className="ml-auto text-xs text-green-600 hover:text-green-800"
-        >
-          Upload another
+        <button onClick={() => { setPhase("idle"); setFiles([]); }} className="ml-auto text-xs text-green-600 hover:text-green-800">
+          Upload more
         </button>
       </div>
     );
   }
 
+  // ── Review list ──
+  if (phase === "reviewing") {
+    return (
+      <div className="mb-5 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-4 pt-3 pb-2 border-b border-gray-100 flex items-center justify-between">
+          <p className="text-sm font-semibold text-gray-800">
+            {isParsing ? "Reading files…" : `${readyReports.length} of ${files.length} file${files.length !== 1 ? "s" : ""} ready`}
+          </p>
+          <button onClick={() => { setPhase("idle"); setFiles([]); }} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+        </div>
+
+        <div className="divide-y divide-gray-50 max-h-60 overflow-y-auto">
+          {files.map((f, i) => (
+            <div key={i} className="px-4 py-2.5 flex items-center gap-3">
+              {f.status === "parsing" && (
+                <svg className="w-4 h-4 text-violet-400 animate-spin flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+              )}
+              {f.status === "ready" && (
+                <svg className="w-4 h-4 text-green-500 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
+                </svg>
+              )}
+              {f.status === "error" && (
+                <svg className="w-4 h-4 text-red-400 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+                </svg>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-gray-600 truncate">{f.name}</p>
+                {f.status === "ready" && (
+                  <p className="text-[10px] text-gray-400">
+                    {f.report.date} · {fmtGbp(f.report.tiktok_spend)} total · Teen {fmtGbp(f.report.teen_spend)} · Parent {fmtGbp(f.report.parent_spend)}
+                  </p>
+                )}
+                {f.status === "error" && <p className="text-[10px] text-red-400">{f.error}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {!isParsing && readyReports.length > 0 && (
+          <div className="px-4 py-3 border-t border-gray-100 flex items-center gap-2">
+            <button
+              onClick={() => {
+                onApply(readyReports.map((f) => f.report));
+                setPhase("applied");
+              }}
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white transition-all"
+              style={{ background: "linear-gradient(135deg, #8B5CF6, #6D28D9)" }}
+            >
+              Apply {readyReports.length} report{readyReports.length !== 1 ? "s" : ""} to sheet
+            </button>
+            <span className="text-[11px] text-gray-400">
+              Fills TikTok Spend, Teen Spend, Parent Spend for each date
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Idle drop zone ──
   return (
     <div
       className={`mb-5 border-2 border-dashed rounded-xl px-5 py-4 transition-all cursor-pointer ${
-        dragging
-          ? "border-violet-400 bg-violet-50"
-          : state.status === "error"
-          ? "border-red-300 bg-red-50"
-          : "border-gray-200 bg-white hover:border-violet-300 hover:bg-violet-50/40"
+        dragging ? "border-violet-400 bg-violet-50" : "border-gray-200 bg-white hover:border-violet-300 hover:bg-violet-50/40"
       }`}
       onClick={() => inputRef.current?.click()}
       onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -391,42 +406,19 @@ function ReportUploadZone({
         ref={inputRef}
         type="file"
         accept=".xlsx,.xls"
+        multiple
         className="hidden"
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+        onChange={(e) => { if (e.target.files?.length) processFiles(Array.from(e.target.files)); e.target.value = ""; }}
       />
       <div className="flex items-center gap-3">
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
-          state.status === "error" ? "bg-red-100" : "bg-violet-100"
-        }`}>
-          {state.status === "parsing" ? (
-            <svg className="w-4 h-4 text-violet-500 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-            </svg>
-          ) : state.status === "error" ? (
-            <svg className="w-4 h-4 text-red-500" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
-            </svg>
-          ) : (
-            <svg className="w-4 h-4 text-violet-500" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd"/>
-            </svg>
-          )}
+        <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0">
+          <svg className="w-4 h-4 text-violet-500" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd"/>
+          </svg>
         </div>
         <div>
-          {state.status === "error" ? (
-            <>
-              <p className="text-sm font-medium text-red-700">{state.error}</p>
-              <p className="text-xs text-red-500 mt-0.5">Click to try again</p>
-            </>
-          ) : state.status === "parsing" ? (
-            <p className="text-sm text-violet-600 font-medium">Reading report…</p>
-          ) : (
-            <>
-              <p className="text-sm font-medium text-gray-700">Upload a report to fill in data</p>
-              <p className="text-xs text-gray-400 mt-0.5">Drop a TikTok Campaign Report (.xlsx) here — date, spend and breakdown will auto-fill</p>
-            </>
-          )}
+          <p className="text-sm font-medium text-gray-700">Upload TikTok reports to fill in data</p>
+          <p className="text-xs text-gray-400 mt-0.5">Drop one or multiple Campaign Report (.xlsx) files — all dates auto-fill at once</p>
         </div>
       </div>
     </div>
@@ -474,11 +466,13 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
     try { localStorage.setItem(LS_KEY, JSON.stringify(newEdits)); } catch { /* ignore */ }
   }, [edits]);
 
-  const applyReport = useCallback((report: ParsedReport) => {
+  const applyReport = useCallback((reports: ParsedReport[]) => {
     const newEdits = { ...edits };
-    newEdits[`${report.date}:tiktok_spend`] = String(report.tiktok_spend);
-    newEdits[`${report.date}:teen_spend`]   = String(report.teen_spend);
-    newEdits[`${report.date}:parent_spend`] = String(report.parent_spend);
+    for (const report of reports) {
+      newEdits[`${report.date}:tiktok_spend`] = String(report.tiktok_spend);
+      newEdits[`${report.date}:teen_spend`]   = String(report.teen_spend);
+      newEdits[`${report.date}:parent_spend`] = String(report.parent_spend);
+    }
     setEdits(newEdits);
     try { localStorage.setItem(LS_KEY, JSON.stringify(newEdits)); } catch { /* ignore */ }
   }, [edits]);
