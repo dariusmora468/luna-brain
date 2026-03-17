@@ -18,10 +18,19 @@ interface AggregatedRow {
   periodLabel: string;
   date?: string;
   tiktok_spend: number | null;
+  tiktok_spend_us: number | null;
+  tiktok_spend_uk: number | null;
+  tiktok_spend_row: number | null;
   google_spend: number | null;
   meta_spend: number | null;
   teen_spend: number | null;
+  teen_spend_us: number | null;
+  teen_spend_uk: number | null;
+  teen_spend_row: number | null;
   parent_spend: number | null;
+  parent_spend_us: number | null;
+  parent_spend_uk: number | null;
+  parent_spend_row: number | null;
   adjust_total_installs: number | null;
   cpi_computed: number | null;
   new_paid_subs: number | null;
@@ -37,8 +46,17 @@ interface ParsedReport {
   type: "tiktok";
   date: string;         // YYYY-MM-DD
   tiktok_spend: number;
+  tiktok_spend_us: number;
+  tiktok_spend_uk: number;
+  tiktok_spend_row: number;
   teen_spend: number;
+  teen_spend_us: number;
+  teen_spend_uk: number;
+  teen_spend_row: number;
   parent_spend: number;
+  parent_spend_us: number;
+  parent_spend_uk: number;
+  parent_spend_row: number;
 }
 
 const LS_KEY = "luna-v3-metrics-edits";
@@ -145,19 +163,48 @@ async function parseTikTokReport(file: File): Promise<ParsedReport | null> {
   // Detect TikTok report: must have "Campaign name" and "Cost" columns
   if (!rows.length || !("Campaign name" in rows[0]) || !("Cost" in rows[0])) return null;
 
-  let total = 0, teen = 0, parent = 0;
+  let total = 0, totalUs = 0, totalUk = 0, totalRow = 0;
+  let teen = 0, teenUs = 0, teenUk = 0, teenRow = 0;
+  let parent = 0, parentUs = 0, parentUk = 0, parentRow = 0;
+
   for (const row of rows) {
     const name = String(row["Campaign name"] ?? "");
     // Skip summary row ("Total of X results")
     if (/^total of \d+/i.test(name)) continue;
     const cost = typeof row["Cost"] === "number" ? row["Cost"] : parseFloat(String(row["Cost"] ?? "0"));
     if (isNaN(cost) || cost <= 0) continue;
+
+    // Detect country: look for " US" or "US " or "[US]" etc; same for UK; else ROW
+    const isUs = /\bUS\b/.test(name);
+    const isUk = /\bUK\b/.test(name);
+    const isTeen = /teen|teens/i.test(name);
+    const isParent = /parent|parents/i.test(name);
+
     total += cost;
-    if (/teen|teens/i.test(name)) teen += cost;
-    if (/parent|parents/i.test(name)) parent += cost;
+    if (isUs) totalUs += cost;
+    else if (isUk) totalUk += cost;
+    else totalRow += cost;
+
+    if (isTeen) {
+      teen += cost;
+      if (isUs) teenUs += cost;
+      else if (isUk) teenUk += cost;
+      else teenRow += cost;
+    }
+    if (isParent) {
+      parent += cost;
+      if (isUs) parentUs += cost;
+      else if (isUk) parentUk += cost;
+      else parentRow += cost;
+    }
   }
 
-  return { type: "tiktok", date, tiktok_spend: total, teen_spend: teen, parent_spend: parent };
+  return {
+    type: "tiktok", date,
+    tiktok_spend: total, tiktok_spend_us: totalUs, tiktok_spend_uk: totalUk, tiktok_spend_row: totalRow,
+    teen_spend: teen, teen_spend_us: teenUs, teen_spend_uk: teenUk, teen_spend_row: teenRow,
+    parent_spend: parent, parent_spend_us: parentUs, parent_spend_uk: parentUk, parent_spend_row: parentRow,
+  };
 }
 
 // ── Aggregation ───────────────────────────────────────────────────────────────
@@ -175,10 +222,19 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
         periodLabel: r.date,
         date: r.date,
         tiktok_spend: r.tiktok_spend,
+        tiktok_spend_us: r.tiktok_spend_us,
+        tiktok_spend_uk: r.tiktok_spend_uk,
+        tiktok_spend_row: r.tiktok_spend_row,
         google_spend: r.google_spend,
         meta_spend: r.meta_spend,
         teen_spend: r.teen_spend,
+        teen_spend_us: r.teen_spend_us,
+        teen_spend_uk: r.teen_spend_uk,
+        teen_spend_row: r.teen_spend_row,
         parent_spend: r.parent_spend,
+        parent_spend_us: r.parent_spend_us,
+        parent_spend_uk: r.parent_spend_uk,
+        parent_spend_row: r.parent_spend_row,
         adjust_total_installs: r.adjust_total_installs,
         cpi_computed: cpi,
         new_paid_subs: r.new_paid_subs,
@@ -213,10 +269,19 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
     return {
       periodLabel: labelPeriod(key, granularity),
       tiktok_spend:          spend,
+      tiktok_spend_us:       sumOrNull(group.map((r) => r.tiktok_spend_us)),
+      tiktok_spend_uk:       sumOrNull(group.map((r) => r.tiktok_spend_uk)),
+      tiktok_spend_row:      sumOrNull(group.map((r) => r.tiktok_spend_row)),
       google_spend:          sumOrNull(group.map((r) => r.google_spend)),
       meta_spend:            sumOrNull(group.map((r) => r.meta_spend)),
       teen_spend:            sumOrNull(group.map((r) => r.teen_spend)),
+      teen_spend_us:         sumOrNull(group.map((r) => r.teen_spend_us)),
+      teen_spend_uk:         sumOrNull(group.map((r) => r.teen_spend_uk)),
+      teen_spend_row:        sumOrNull(group.map((r) => r.teen_spend_row)),
       parent_spend:          sumOrNull(group.map((r) => r.parent_spend)),
+      parent_spend_us:       sumOrNull(group.map((r) => r.parent_spend_us)),
+      parent_spend_uk:       sumOrNull(group.map((r) => r.parent_spend_uk)),
+      parent_spend_row:      sumOrNull(group.map((r) => r.parent_spend_row)),
       adjust_total_installs: installs,
       cpi_computed:          cpi,
       new_paid_subs:         subs,
@@ -464,17 +529,48 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
     if (value.trim() === "") delete newEdits[`${date}:${colKey}`];
     setEdits(newEdits);
     try { localStorage.setItem(LS_KEY, JSON.stringify(newEdits)); } catch { /* ignore */ }
+
+    const raw = value.trim();
+    const num = raw === "" ? null : parseFloat(raw.replace(/[£,]/g, ""));
+    fetch("/api/v3/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date, fields: { [colKey]: raw === "" || isNaN(num as number) ? null : num } }),
+    }).catch(() => { /* non-blocking */ });
   }, [edits]);
 
   const applyReport = useCallback((reports: ParsedReport[]) => {
     const newEdits = { ...edits };
-    for (const report of reports) {
-      newEdits[`${report.date}:tiktok_spend`] = String(report.tiktok_spend);
-      newEdits[`${report.date}:teen_spend`]   = String(report.teen_spend);
-      newEdits[`${report.date}:parent_spend`] = String(report.parent_spend);
+    for (const r of reports) {
+      newEdits[`${r.date}:tiktok_spend`]     = String(r.tiktok_spend);
+      newEdits[`${r.date}:tiktok_spend_us`]  = String(r.tiktok_spend_us);
+      newEdits[`${r.date}:tiktok_spend_uk`]  = String(r.tiktok_spend_uk);
+      newEdits[`${r.date}:tiktok_spend_row`] = String(r.tiktok_spend_row);
+      newEdits[`${r.date}:teen_spend`]       = String(r.teen_spend);
+      newEdits[`${r.date}:teen_spend_us`]    = String(r.teen_spend_us);
+      newEdits[`${r.date}:teen_spend_uk`]    = String(r.teen_spend_uk);
+      newEdits[`${r.date}:teen_spend_row`]   = String(r.teen_spend_row);
+      newEdits[`${r.date}:parent_spend`]     = String(r.parent_spend);
+      newEdits[`${r.date}:parent_spend_us`]  = String(r.parent_spend_us);
+      newEdits[`${r.date}:parent_spend_uk`]  = String(r.parent_spend_uk);
+      newEdits[`${r.date}:parent_spend_row`] = String(r.parent_spend_row);
     }
     setEdits(newEdits);
     try { localStorage.setItem(LS_KEY, JSON.stringify(newEdits)); } catch { /* ignore */ }
+
+    const payloads = reports.map((r) => ({
+      date: r.date,
+      fields: {
+        tiktok_spend: r.tiktok_spend, tiktok_spend_us: r.tiktok_spend_us, tiktok_spend_uk: r.tiktok_spend_uk, tiktok_spend_row: r.tiktok_spend_row,
+        teen_spend: r.teen_spend, teen_spend_us: r.teen_spend_us, teen_spend_uk: r.teen_spend_uk, teen_spend_row: r.teen_spend_row,
+        parent_spend: r.parent_spend, parent_spend_us: r.parent_spend_us, parent_spend_uk: r.parent_spend_uk, parent_spend_row: r.parent_spend_row,
+      },
+    }));
+    fetch("/api/v3/save-edits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payloads),
+    }).catch(() => { /* non-blocking */ });
   }, [edits]);
 
   const colCount = DAILY_COLUMNS.length;

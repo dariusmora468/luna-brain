@@ -9,10 +9,19 @@ function emptyRow(dateStr: string): DailyActualsRow {
   return {
     date: dateStr,
     tiktok_spend: null,
+    tiktok_spend_us: null,
+    tiktok_spend_uk: null,
+    tiktok_spend_row: null,
     google_spend: null,
     meta_spend: null,
     teen_spend: null,
+    teen_spend_us: null,
+    teen_spend_uk: null,
+    teen_spend_row: null,
     parent_spend: null,
+    parent_spend_us: null,
+    parent_spend_uk: null,
+    parent_spend_row: null,
     adjust_total_installs: null,
     est_paid_installs: null,
     teen_installs: null,
@@ -51,7 +60,7 @@ function buildDateScaffold(): DailyActualsRow[] {
 export default async function V3MetricsPage() {
   const supabase = createServerClient();
 
-  const [dailyResult, monthlyResult] = await Promise.all([
+  const [dailyResult, monthlyResult, editsResult] = await Promise.all([
     supabase
       .from("v2_sheet_rows")
       .select("row_index, data")
@@ -63,6 +72,9 @@ export default async function V3MetricsPage() {
       .eq("tab", "monthly_metric")
       .order("row_index", { ascending: false })
       .limit(1),
+    supabase
+      .from("v3_daily_edits")
+      .select("date, data"),
   ]);
 
   if (dailyResult.error) {
@@ -73,6 +85,13 @@ export default async function V3MetricsPage() {
     );
   }
 
+  // Build edit overrides map: date → field values from v3_daily_edits
+  const editsMap = new Map<string, Record<string, number | null>>();
+  for (const row of editsResult.data ?? []) {
+    const d = typeof row.date === "string" ? row.date : String(row.date);
+    editsMap.set(d, row.data as Record<string, number | null>);
+  }
+
   // Parse DB rows into a map keyed by date
   const dbMap = new Map<string, DailyActualsRow>();
   for (const r of dailyResult.data ?? []) {
@@ -80,9 +99,14 @@ export default async function V3MetricsPage() {
     if (parsed) dbMap.set(parsed.date, parsed);
   }
 
-  // Merge scaffold with DB data (DB takes precedence)
+  // Merge: scaffold → db row → manual edits (each layer wins over previous)
   const scaffold = buildDateScaffold();
-  const dailyRows: DailyActualsRow[] = scaffold.map((s) => dbMap.get(s.date) ?? s);
+  const dailyRows: DailyActualsRow[] = scaffold.map((s) => {
+    const base = dbMap.get(s.date) ?? s;
+    const edits = editsMap.get(s.date);
+    if (!edits) return base;
+    return { ...base, ...edits };
+  });
 
   let projectedLtv: number | null = null;
   if (monthlyResult.data?.[0]) {

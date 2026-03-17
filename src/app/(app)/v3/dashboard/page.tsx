@@ -7,8 +7,10 @@ export const dynamic = "force-dynamic";
 function emptyRow(dateStr: string): DailyActualsRow {
   return {
     date: dateStr,
-    tiktok_spend: null, google_spend: null, meta_spend: null,
-    teen_spend: null, parent_spend: null,
+    tiktok_spend: null, tiktok_spend_us: null, tiktok_spend_uk: null, tiktok_spend_row: null,
+    google_spend: null, meta_spend: null,
+    teen_spend: null, teen_spend_us: null, teen_spend_uk: null, teen_spend_row: null,
+    parent_spend: null, parent_spend_us: null, parent_spend_uk: null, parent_spend_row: null,
     adjust_total_installs: null, est_paid_installs: null,
     teen_installs: null, parent_installs: null,
     new_paid_subs: null, revenue: null, mrr: null,
@@ -37,27 +39,43 @@ function buildDateScaffold(): DailyActualsRow[] {
 export default async function V3DashboardPage() {
   const supabase = createServerClient();
 
-  const { data, error } = await supabase
-    .from("v2_sheet_rows")
-    .select("row_index, data")
-    .eq("tab", "daily_actuals")
-    .order("row_index", { ascending: true });
+  const [dailyResult, editsResult] = await Promise.all([
+    supabase
+      .from("v2_sheet_rows")
+      .select("row_index, data")
+      .eq("tab", "daily_actuals")
+      .order("row_index", { ascending: true }),
+    supabase
+      .from("v3_daily_edits")
+      .select("date, data"),
+  ]);
 
-  if (error) {
+  if (dailyResult.error) {
     return (
       <div className="p-8">
-        <p className="text-red-500">Error loading data: {error.message}</p>
+        <p className="text-red-500">Error loading data: {dailyResult.error.message}</p>
       </div>
     );
   }
 
-  // Merge DB rows with scaffold (DB takes precedence per date)
+  const editsMap = new Map<string, Record<string, number | null>>();
+  for (const row of editsResult.data ?? []) {
+    const d = typeof row.date === "string" ? row.date : String(row.date);
+    editsMap.set(d, row.data as Record<string, number | null>);
+  }
+
   const dbMap = new Map<string, DailyActualsRow>();
-  for (const r of data ?? []) {
+  for (const r of dailyResult.data ?? []) {
     const parsed = parseDailyActualsRow(r.data as Record<string, string>);
     if (parsed) dbMap.set(parsed.date, parsed);
   }
-  const dailyRows: DailyActualsRow[] = buildDateScaffold().map((s) => dbMap.get(s.date) ?? s);
+
+  const dailyRows: DailyActualsRow[] = buildDateScaffold().map((s) => {
+    const base = dbMap.get(s.date) ?? s;
+    const edits = editsMap.get(s.date);
+    if (!edits) return base;
+    return { ...base, ...edits };
+  });
 
   return <DashboardView dailyRows={dailyRows} />;
 }

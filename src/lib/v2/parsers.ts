@@ -14,10 +14,19 @@ export interface DailyActualsRow {
   date: string;
   // Spend
   tiktok_spend: number | null;
+  tiktok_spend_us: number | null;
+  tiktok_spend_uk: number | null;
+  tiktok_spend_row: number | null;
   google_spend: number | null;
   meta_spend: number | null;
   teen_spend: number | null;
+  teen_spend_us: number | null;
+  teen_spend_uk: number | null;
+  teen_spend_row: number | null;
   parent_spend: number | null;
+  parent_spend_us: number | null;
+  parent_spend_uk: number | null;
+  parent_spend_row: number | null;
   // Installs
   adjust_total_installs: number | null;
   est_paid_installs: number | null;
@@ -50,10 +59,19 @@ export function parseDailyActualsRow(row: Record<string, string>): DailyActualsR
   return {
     date,
     tiktok_spend: num(row["TikTok Spend (£)"] ?? row["TikTok Spend"] ?? row["Spend (£)"] ?? row["Total Spend"] ?? row["Spend"] ?? null),
+    tiktok_spend_us: num(row["TikTok Spend US (£)"] ?? row["TikTok Spend US"] ?? null),
+    tiktok_spend_uk: num(row["TikTok Spend UK (£)"] ?? row["TikTok Spend UK"] ?? null),
+    tiktok_spend_row: num(row["TikTok Spend ROW (£)"] ?? row["TikTok Spend ROW"] ?? null),
     google_spend: num(row["Google Spend (£)"] ?? row["Google Spend"] ?? row["Google Ads Spend"] ?? null),
     meta_spend: num(row["Meta Spend (£)"] ?? row["Meta Spend"] ?? row["Facebook Spend"] ?? row["Meta Ads Spend"] ?? null),
     teen_spend: num(row["Teen Spend (£)"] ?? row["Teen Spend"] ?? row["Spend: UK Teen"] ?? row["Spend: US Teen"] ?? null),
+    teen_spend_us: num(row["Teen Spend US (£)"] ?? row["Teen Spend US"] ?? null),
+    teen_spend_uk: num(row["Teen Spend UK (£)"] ?? row["Teen Spend UK"] ?? null),
+    teen_spend_row: num(row["Teen Spend ROW (£)"] ?? row["Teen Spend ROW"] ?? null),
     parent_spend: num(row["Parent Spend (£)"] ?? row["Parent Spend"] ?? row["Spend: UK Parent"] ?? row["Spend: US Parent"] ?? null),
+    parent_spend_us: num(row["Parent Spend US (£)"] ?? row["Parent Spend US"] ?? null),
+    parent_spend_uk: num(row["Parent Spend UK (£)"] ?? row["Parent Spend UK"] ?? null),
+    parent_spend_row: num(row["Parent Spend ROW (£)"] ?? row["Parent Spend ROW"] ?? null),
     adjust_total_installs: num(row["Adjust Total Installs"] ?? row["Total Installs"] ?? row["Installs"] ?? null),
     est_paid_installs: num(row["Est. Paid Installs"] ?? row["Estimated Paid Installs"] ?? row["Est. Paid Installs"] ?? row["Paid Installs"] ?? null),
     teen_installs: num(row["Teen Installs"] ?? null),
