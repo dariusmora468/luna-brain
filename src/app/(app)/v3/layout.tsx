@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import V2Toggle from "@/components/V2Toggle";
 
 const NAV = [
+  { label: "Dashboard", href: "/v3/dashboard", icon: "📈" },
   { label: "Metrics", href: "/v3/metrics", icon: "📐" },
   { label: "Experiments", href: "/v3/experiments", icon: "🧪" },
 ];
