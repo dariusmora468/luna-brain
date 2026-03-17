@@ -73,8 +73,6 @@ interface MetricGroup { label: string; metrics: MetricConfig[] }
 const METRICS: MetricConfig[] = [
   // ── Spend ──
   { key: "tiktok_spend",   label: "Ad Spend (TikTok)",    color: "#F97316", format: "gbp",    hasLag: false, getValue: (r) => r.tiktok_spend },
-  { key: "teen_spend",     label: "TikTok Teen Spend",    color: "#FB923C", format: "gbp",    hasLag: false, getValue: (r) => r.teen_spend },
-  { key: "parent_spend",   label: "TikTok Parent Spend",  color: "#FDBA74", format: "gbp",    hasLag: false, getValue: (r) => r.parent_spend },
   { key: "google_spend",   label: "Google Spend",         color: "#3B82F6", format: "gbp",    hasLag: false, getValue: (r) => r.google_spend },
   { key: "meta_spend",     label: "Meta Spend",           color: "#6366F1", format: "gbp",    hasLag: false, getValue: (r) => r.meta_spend },
   // ── Acquisition ──
@@ -88,10 +86,10 @@ const METRICS: MetricConfig[] = [
 ];
 
 const METRIC_GROUPS: MetricGroup[] = [
-  { label: "Spend", metrics: METRICS.slice(0, 5) },
-  { label: "Acquisition", metrics: METRICS.slice(5, 7) },
-  { label: "Revenue", metrics: METRICS.slice(7, 9) },
-  { label: "Performance", metrics: METRICS.slice(9) },
+  { label: "Spend", metrics: METRICS.slice(0, 3) },
+  { label: "Acquisition", metrics: METRICS.slice(3, 5) },
+  { label: "Revenue", metrics: METRICS.slice(5, 7) },
+  { label: "Performance", metrics: METRICS.slice(7) },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
