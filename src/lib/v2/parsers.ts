@@ -33,6 +33,9 @@ export interface DailyActualsRow {
   installs_uk: number | null;           // iOS UK
   installs_row: number | null;          // iOS ROW
   installs_android: number | null;      // Android total
+  installs_android_us: number | null;   // Android US
+  installs_android_uk: number | null;   // Android UK
+  installs_android_row: number | null;  // Android ROW
   est_paid_installs: number | null;
   teen_installs: number | null;
   parent_installs: number | null;
@@ -82,7 +85,10 @@ export function parseDailyActualsRow(row: Record<string, string>): DailyActualsR
     installs_us: num(row["Installs US"] ?? row["iOS Installs US"] ?? null),
     installs_uk: num(row["Installs UK"] ?? row["iOS Installs UK"] ?? null),
     installs_row: num(row["Installs ROW"] ?? row["iOS Installs ROW"] ?? null),
-    installs_android: num(row["Android Installs"] ?? row["Installs Android"] ?? null),
+    installs_android:     num(row["Android Installs"] ?? row["Installs Android"] ?? null),
+    installs_android_us:  num(row["Android Installs US"] ?? row["Installs Android US"] ?? null),
+    installs_android_uk:  num(row["Android Installs UK"] ?? row["Installs Android UK"] ?? null),
+    installs_android_row: num(row["Android Installs ROW"] ?? row["Installs Android ROW"] ?? null),
     est_paid_installs: num(row["Est. Paid Installs"] ?? row["Estimated Paid Installs"] ?? row["Est. Paid Installs"] ?? row["Paid Installs"] ?? null),
     teen_installs: num(row["Teen Installs"] ?? null),
     parent_installs: num(row["Parent Installs"] ?? null),

@@ -43,12 +43,29 @@ function resolveSpend(r: DailyActualsRow, country: Country, audience: Audience):
   return r.tiktok_spend;
 }
 
-function resolveInstalls(r: DailyActualsRow, platform: Platform): number | null {
-  if (platform === "ios") return r.adjust_total_installs;
-  if (platform === "android") return r.installs_android;
-  // "all": sum iOS + Android (only null if both are null)
-  if (r.adjust_total_installs === null && r.installs_android === null) return null;
-  return (r.adjust_total_installs ?? 0) + (r.installs_android ?? 0);
+function sumNulls(a: number | null, b: number | null): number | null {
+  if (a === null && b === null) return null;
+  return (a ?? 0) + (b ?? 0);
+}
+
+function resolveInstalls(r: DailyActualsRow, country: Country, platform: Platform): number | null {
+  if (platform === "ios") {
+    if (country === "us")  return r.installs_us;
+    if (country === "uk")  return r.installs_uk;
+    if (country === "row") return r.installs_row;
+    return r.adjust_total_installs;
+  }
+  if (platform === "android") {
+    if (country === "us")  return r.installs_android_us;
+    if (country === "uk")  return r.installs_android_uk;
+    if (country === "row") return r.installs_android_row;
+    return r.installs_android;
+  }
+  // "all" platform: sum iOS + Android per geo
+  if (country === "us")  return sumNulls(r.installs_us,           r.installs_android_us);
+  if (country === "uk")  return sumNulls(r.installs_uk,           r.installs_android_uk);
+  if (country === "row") return sumNulls(r.installs_row,          r.installs_android_row);
+  return sumNulls(r.adjust_total_installs, r.installs_android);
 }
 
 function resolveTeenSpend(r: DailyActualsRow, country: Country): number | null {
@@ -213,9 +230,9 @@ export default function DashboardView({ dailyRows }: Props) {
       } else if (metric.key === "parent_spend") {
         getVal = (r) => resolveParentSpend(r, country);
       } else if (metric.key === "installs") {
-        getVal = (r) => resolveInstalls(r, platform);
+        getVal = (r) => resolveInstalls(r, country, platform);
       } else if (metric.key === "cpi") {
-        getVal = (r) => { const s = resolveSpend(r, country, audience); const inst = resolveInstalls(r, platform); return s !== null && inst ? s / inst : null; };
+        getVal = (r) => { const s = resolveSpend(r, country, audience); const inst = resolveInstalls(r, country, platform); return s !== null && inst ? s / inst : null; };
       } else if (metric.key === "cac") {
         getVal = (r) => { const s = resolveSpend(r, country, audience); return s !== null && r.new_paid_subs ? s / r.new_paid_subs : null; };
       }

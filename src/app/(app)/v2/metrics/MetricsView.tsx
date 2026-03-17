@@ -36,7 +36,13 @@ interface AggregatedRow {
   installs_uk: number | null;
   installs_row: number | null;
   installs_android: number | null;
+  installs_android_us: number | null;
+  installs_android_uk: number | null;
+  installs_android_row: number | null;
   cpi_computed: number | null;
+  cpi_ios_computed: number | null;
+  cpi_android_computed: number | null;
+  cpt_computed: number | null;
   new_paid_subs: number | null;
   revenue: number | null;
   trials_all: number | null;
@@ -74,6 +80,15 @@ interface AppStoreReport {
   installs_row: number;
 }
 
+interface GooglePlayReport {
+  type: "googleplay";
+  date: string;
+  installs_android: number;
+  installs_android_us: number;
+  installs_android_uk: number;
+  installs_android_row: number;
+}
+
 interface PurchaselyReport {
   type: "purchasely";
   date: string;
@@ -83,7 +98,7 @@ interface PurchaselyReport {
   trials_row: number;
 }
 
-type ParsedReport = TikTokReport | AppStoreReport | PurchaselyReport;
+type ParsedReport = TikTokReport | AppStoreReport | GooglePlayReport | PurchaselyReport;
 
 const LS_KEY = "luna-v3-metrics-edits";
 
@@ -294,6 +309,46 @@ async function parseAppStoreReport(file: File): Promise<AppStoreReport[] | null>
   return results.length > 0 ? results : null;
 }
 
+// ── Google Play Console CSV parser ────────────────────────────────────────────
+// Source: Play Console → Statistics → User acquisition → Export CSV
+// Columns: Date, "User acquisition (...): All countries / regions", "...: United States", "...: United Kingdom", etc.
+
+async function parseGooglePlayReport(file: File): Promise<GooglePlayReport[] | null> {
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  const headerIdx = lines.findIndex((l) => l.startsWith("Date,"));
+  if (headerIdx === -1) return null;
+
+  const headers = parseCSVLine(lines[headerIdx]);
+  if (!headers.some((h) => h.includes("User acquisition"))) return null;
+
+  const totalIdx = headers.findIndex((h) => h.includes("All countries"));
+  const usIdx    = headers.findIndex((h) => h.includes("United States"));
+  const ukIdx    = headers.findIndex((h) => h.includes("United Kingdom"));
+  if (totalIdx === -1) return null;
+
+  const results: GooglePlayReport[] = [];
+  for (const line of lines.slice(headerIdx + 1)) {
+    const vals = parseCSVLine(line);
+    if (!vals[0]) continue;
+
+    // Parse "Dec 17, 2025" format
+    const d = new Date(vals[0].replace(/"/g, ""));
+    if (isNaN(d.getTime())) continue;
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    const total = parseInt(vals[totalIdx] ?? "0") || 0;
+    const us    = usIdx !== -1 ? (parseInt(vals[usIdx] ?? "0") || 0) : 0;
+    const uk    = ukIdx !== -1 ? (parseInt(vals[ukIdx] ?? "0") || 0) : 0;
+    const row   = Math.max(0, total - us - uk);
+
+    results.push({ type: "googleplay", date, installs_android: total, installs_android_us: us, installs_android_uk: uk, installs_android_row: row });
+  }
+
+  return results.length > 0 ? results : null;
+}
+
 // ── Purchasely Conversion CSV parser ──────────────────────────────────────────
 // Source: Purchasely → Analytics → Conversion report (CSV export)
 // "conversions_to_offer_price" = trial starts (free trial = offer price of £0)
@@ -349,8 +404,15 @@ async function parsePurchaselyReport(file: File): Promise<PurchaselyReport[] | n
 function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedLtv: number | null): AggregatedRow[] {
   if (granularity === "daily") {
     return rows.map((r) => {
-      const cpi = r.tiktok_spend !== null && r.adjust_total_installs
+      const totalInstalls = (r.adjust_total_installs ?? 0) + (r.installs_android ?? 0);
+      const cpi = r.tiktok_spend !== null && totalInstalls > 0
+        ? r.tiktok_spend / totalInstalls : null;
+      const cpi_ios = r.tiktok_spend !== null && r.adjust_total_installs
         ? r.tiktok_spend / r.adjust_total_installs : null;
+      const cpi_android = r.tiktok_spend !== null && r.installs_android
+        ? r.tiktok_spend / r.installs_android : null;
+      const cpt = r.tiktok_spend !== null && r.trials_all
+        ? r.tiktok_spend / r.trials_all : null;
       const cac = r.tiktok_spend !== null && r.new_paid_subs
         ? r.tiktok_spend / r.new_paid_subs : null;
       const ltv_cac = cac !== null && projectedLtv !== null && cac > 0
@@ -377,7 +439,13 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
         installs_uk: r.installs_uk,
         installs_row: r.installs_row,
         installs_android: r.installs_android,
+        installs_android_us: r.installs_android_us,
+        installs_android_uk: r.installs_android_uk,
+        installs_android_row: r.installs_android_row,
         cpi_computed: cpi,
+        cpi_ios_computed: cpi_ios,
+        cpi_android_computed: cpi_android,
+        cpt_computed: cpt,
         new_paid_subs: r.new_paid_subs,
         revenue: r.revenue,
         trials_all: r.trials_all,
@@ -402,10 +470,18 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
   }
 
   return Array.from(groups.entries()).map(([key, group]) => {
-    const spend    = sumOrNull(group.map((r) => r.tiktok_spend));
-    const installs = sumOrNull(group.map((r) => r.adjust_total_installs));
-    const subs     = sumOrNull(group.map((r) => r.new_paid_subs));
-    const cpi  = spend !== null && installs ? spend / installs : null;
+    const spend          = sumOrNull(group.map((r) => r.tiktok_spend));
+    const iosInstalls    = sumOrNull(group.map((r) => r.adjust_total_installs));
+    const androidTotal   = sumOrNull(group.map((r) => r.installs_android));
+    const iosVal         = iosInstalls ?? 0;
+    const androidVal     = androidTotal ?? 0;
+    const installs       = iosInstalls !== null || androidTotal !== null ? iosVal + androidVal : null;
+    const subs           = sumOrNull(group.map((r) => r.new_paid_subs));
+    const trialsTotal = sumOrNull(group.map((r) => r.trials_all));
+    const cpi         = spend !== null && installs     ? spend / installs     : null;
+    const cpi_ios     = spend !== null && iosInstalls  ? spend / iosInstalls  : null;
+    const cpi_android = spend !== null && androidTotal ? spend / androidTotal : null;
+    const cpt         = spend !== null && trialsTotal  ? spend / trialsTotal  : null;
     const cac  = spend !== null && subs     ? spend / subs     : null;
     const ltv_cac = cac !== null && projectedLtv !== null && cac > 0
       ? projectedLtv / cac : null;
@@ -425,12 +501,18 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
       parent_spend_us:       sumOrNull(group.map((r) => r.parent_spend_us)),
       parent_spend_uk:       sumOrNull(group.map((r) => r.parent_spend_uk)),
       parent_spend_row:      sumOrNull(group.map((r) => r.parent_spend_row)),
-      adjust_total_installs: installs,
+      adjust_total_installs: iosInstalls,
       installs_us:           sumOrNull(group.map((r) => r.installs_us)),
       installs_uk:           sumOrNull(group.map((r) => r.installs_uk)),
       installs_row:          sumOrNull(group.map((r) => r.installs_row)),
-      installs_android:      sumOrNull(group.map((r) => r.installs_android)),
+      installs_android:      androidTotal,
+      installs_android_us:   sumOrNull(group.map((r) => r.installs_android_us)),
+      installs_android_uk:   sumOrNull(group.map((r) => r.installs_android_uk)),
+      installs_android_row:  sumOrNull(group.map((r) => r.installs_android_row)),
       cpi_computed:          cpi,
+      cpi_ios_computed:      cpi_ios,
+      cpi_android_computed:  cpi_android,
+      cpt_computed:          cpt,
       new_paid_subs:         subs,
       revenue:               sumOrNull(group.map((r) => r.revenue)),
       trials_all:            sumOrNull(group.map((r) => r.trials_all)),
@@ -503,11 +585,18 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
       accepted.map(async (f): Promise<FileResult> => {
         try {
           if (f.name.endsWith(".csv")) {
-            // Detect Purchasely (lowercase "date," header) vs App Store Connect (uppercase "Date,")
-            const preview = await f.slice(0, 200).text();
+            // Detect by first 512 chars:
+            //   lowercase "date,"       → Purchasely Conversion
+            //   "User acquisition"      → Google Play Console
+            //   "Date," (uppercase)     → App Store Connect
+            const preview = await f.slice(0, 512).text();
             if (preview.trimStart().startsWith("date,")) {
               const reports = await parsePurchaselyReport(f);
               if (!reports) return { status: "error", name: f.name, error: "Unrecognised Purchasely format — expected Conversion report with conversions_to_offer_price column." };
+              return { status: "ready", name: f.name, reports };
+            } else if (preview.includes("User acquisition")) {
+              const reports = await parseGooglePlayReport(f);
+              if (!reports) return { status: "error", name: f.name, error: "Unrecognised Google Play format — expected User acquisition statistics export." };
               return { status: "ready", name: f.name, reports };
             } else {
               const reports = await parseAppStoreReport(f);
@@ -596,6 +685,9 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
                   } else if (first.type === "appstore") {
                     const total = f.reports.reduce((s, r) => s + (r.type === "appstore" ? r.adjust_total_installs : 0), 0);
                     return <p className="text-[10px] text-gray-400">{f.reports.length} dates · {fmtNum(total)} iOS installs · US + UK + ROW</p>;
+                  } else if (first.type === "googleplay") {
+                    const total = f.reports.reduce((s, r) => s + (r.type === "googleplay" ? r.installs_android : 0), 0);
+                    return <p className="text-[10px] text-gray-400">{f.reports.length} dates · {fmtNum(total)} Android installs · UK + ROW</p>;
                   } else {
                     const total = f.reports.reduce((s, r) => s + (r.type === "purchasely" ? r.trials_all : 0), 0);
                     return <p className="text-[10px] text-gray-400">{f.reports.length} dates · {fmtNum(total)} total trials · US + UK + ROW</p>;
@@ -655,7 +747,7 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
         </div>
         <div>
           <p className="text-sm font-medium text-gray-700">Upload reports to fill in data</p>
-          <p className="text-xs text-gray-400 mt-0.5">TikTok (.xlsx), App Store Connect installs (.csv), or Purchasely Conversion (.csv) — all dates auto-fill</p>
+          <p className="text-xs text-gray-400 mt-0.5">TikTok (.xlsx), App Store Connect (.csv), Google Play Console (.csv), or Purchasely Conversion (.csv)</p>
         </div>
       </div>
     </div>
@@ -732,6 +824,11 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
         newEdits[`${r.date}:installs_us`]           = String(r.installs_us);
         newEdits[`${r.date}:installs_uk`]           = String(r.installs_uk);
         newEdits[`${r.date}:installs_row`]          = String(r.installs_row);
+      } else if (r.type === "googleplay") {
+        newEdits[`${r.date}:installs_android`]      = String(r.installs_android);
+        newEdits[`${r.date}:installs_android_us`]   = String(r.installs_android_us);
+        newEdits[`${r.date}:installs_android_uk`]   = String(r.installs_android_uk);
+        newEdits[`${r.date}:installs_android_row`]  = String(r.installs_android_row);
       } else {
         newEdits[`${r.date}:trials_all`] = String(r.trials_all);
         newEdits[`${r.date}:trials_us`]  = String(r.trials_us);
@@ -753,6 +850,10 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
         : r.type === "appstore"
         ? {
             adjust_total_installs: r.adjust_total_installs, installs_us: r.installs_us, installs_uk: r.installs_uk, installs_row: r.installs_row,
+          }
+        : r.type === "googleplay"
+        ? {
+            installs_android: r.installs_android, installs_android_us: r.installs_android_us, installs_android_uk: r.installs_android_uk, installs_android_row: r.installs_android_row,
           }
         : {
             trials_all: r.trials_all, trials_us: r.trials_us, trials_uk: r.trials_uk, trials_row: r.trials_row,
