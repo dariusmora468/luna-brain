@@ -9,6 +9,8 @@ function emptyRow(dateStr: string): DailyActualsRow {
   return {
     date: dateStr,
     tiktok_spend: null,
+    google_spend: null,
+    meta_spend: null,
     teen_spend: null,
     parent_spend: null,
     adjust_total_installs: null,

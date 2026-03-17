@@ -14,6 +14,8 @@ export interface DailyActualsRow {
   date: string;
   // Spend
   tiktok_spend: number | null;
+  google_spend: number | null;
+  meta_spend: number | null;
   teen_spend: number | null;
   parent_spend: number | null;
   // Installs
@@ -48,6 +50,8 @@ export function parseDailyActualsRow(row: Record<string, string>): DailyActualsR
   return {
     date,
     tiktok_spend: num(row["TikTok Spend (£)"] ?? row["TikTok Spend"] ?? row["Spend (£)"] ?? row["Total Spend"] ?? row["Spend"] ?? null),
+    google_spend: num(row["Google Spend (£)"] ?? row["Google Spend"] ?? row["Google Ads Spend"] ?? null),
+    meta_spend: num(row["Meta Spend (£)"] ?? row["Meta Spend"] ?? row["Facebook Spend"] ?? row["Meta Ads Spend"] ?? null),
     teen_spend: num(row["Teen Spend (£)"] ?? row["Teen Spend"] ?? row["Spend: UK Teen"] ?? row["Spend: US Teen"] ?? null),
     parent_spend: num(row["Parent Spend (£)"] ?? row["Parent Spend"] ?? row["Spend: UK Parent"] ?? row["Spend: US Parent"] ?? null),
     adjust_total_installs: num(row["Adjust Total Installs"] ?? row["Total Installs"] ?? row["Installs"] ?? null),
