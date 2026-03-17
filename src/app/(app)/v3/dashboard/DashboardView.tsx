@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { DailyActualsRow } from "@/lib/v2/parsers";
+
+const LS_KEY = "luna-v3-metrics-edits";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -27,50 +29,31 @@ interface MetricConfig {
   getValue: (row: DailyActualsRow) => number | null;
 }
 
+// Groups for the left sidebar
+interface MetricGroup { label: string; metrics: MetricConfig[] }
+
 const METRICS: MetricConfig[] = [
-  {
-    key: "tiktok_spend",
-    label: "Ad Spend",
-    color: "#F97316",
-    format: "gbp",
-    hasLag: false,
-    getValue: (r) => r.tiktok_spend,
-  },
-  {
-    key: "adjust_total_installs",
-    label: "Installs",
-    color: "#3B82F6",
-    format: "number",
-    hasLag: false,
-    getValue: (r) => r.adjust_total_installs,
-  },
-  {
-    key: "cpi",
-    label: "Cost Per Install",
-    color: "#10B981",
-    format: "gbp",
-    hasLag: false,
-    getValue: (r) =>
-      r.tiktok_spend !== null && r.adjust_total_installs
-        ? r.tiktok_spend / r.adjust_total_installs
-        : null,
-  },
-  {
-    key: "revenue",
-    label: "Revenue",
-    color: "#8B5CF6",
-    format: "gbp",
-    hasLag: true,
-    getValue: (r) => r.revenue,
-  },
-  {
-    key: "new_paid_subs",
-    label: "New Subscribers",
-    color: "#EC4899",
-    format: "number",
-    hasLag: true,
-    getValue: (r) => r.new_paid_subs,
-  },
+  // ── Spend ──
+  { key: "tiktok_spend",   label: "Ad Spend (TikTok)",    color: "#F97316", format: "gbp",    hasLag: false, getValue: (r) => r.tiktok_spend },
+  { key: "teen_spend",     label: "TikTok Teen Spend",    color: "#FB923C", format: "gbp",    hasLag: false, getValue: (r) => r.teen_spend },
+  { key: "parent_spend",   label: "TikTok Parent Spend",  color: "#FDBA74", format: "gbp",    hasLag: false, getValue: (r) => r.parent_spend },
+  { key: "google_spend",   label: "Google Spend",         color: "#3B82F6", format: "gbp",    hasLag: false, getValue: (r) => r.google_spend },
+  { key: "meta_spend",     label: "Meta Spend",           color: "#6366F1", format: "gbp",    hasLag: false, getValue: (r) => r.meta_spend },
+  // ── Acquisition ──
+  { key: "installs",       label: "Installs",             color: "#10B981", format: "number", hasLag: false, getValue: (r) => r.adjust_total_installs },
+  { key: "cpi",            label: "Cost Per Install",     color: "#059669", format: "gbp",    hasLag: false, getValue: (r) => r.tiktok_spend !== null && r.adjust_total_installs ? r.tiktok_spend / r.adjust_total_installs : null },
+  // ── Revenue ──
+  { key: "revenue",        label: "Revenue",              color: "#8B5CF6", format: "gbp",    hasLag: true,  getValue: (r) => r.revenue },
+  { key: "new_paid_subs",  label: "New Subscribers",      color: "#EC4899", format: "number", hasLag: true,  getValue: (r) => r.new_paid_subs },
+  // ── Performance ──
+  { key: "cac",            label: "CAC",                  color: "#DC2626", format: "gbp",    hasLag: false, getValue: (r) => r.tiktok_spend !== null && r.new_paid_subs ? r.tiktok_spend / r.new_paid_subs : null },
+];
+
+const METRIC_GROUPS: MetricGroup[] = [
+  { label: "Spend", metrics: METRICS.slice(0, 5) },
+  { label: "Acquisition", metrics: METRICS.slice(5, 7) },
+  { label: "Revenue", metrics: METRICS.slice(7, 9) },
+  { label: "Performance", metrics: METRICS.slice(9) },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -108,16 +91,44 @@ interface Props {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+function applyEdits(row: DailyActualsRow, edits: Record<string, string>): DailyActualsRow {
+  const result = { ...row };
+  const editableKeys = ["tiktok_spend","teen_spend","parent_spend","google_spend","meta_spend","adjust_total_installs","new_paid_subs","revenue","trials_teen","trials_parent"];
+  for (const key of editableKeys) {
+    const editKey = `${row.date}:${key}`;
+    if (editKey in edits) {
+      const raw = edits[editKey].trim();
+      const num = parseFloat(raw.replace(/[£,]/g, ""));
+      (result as Record<string, unknown>)[key] = raw === "" ? null : isNaN(num) ? null : num;
+    }
+  }
+  return result;
+}
+
 export default function DashboardView({ dailyRows }: Props) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(["tiktok_spend"]));
   const [lagEnabled, setLagEnabled] = useState<Set<string>>(() => new Set());
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [edits, setEdits] = useState<Record<string, string>>({});
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Sort ascending by date
+  // Sync edits from localStorage (kept in sync with Metrics sheet)
+  useEffect(() => {
+    const load = () => {
+      try {
+        const saved = localStorage.getItem(LS_KEY);
+        if (saved) setEdits(JSON.parse(saved));
+      } catch { /* ignore */ }
+    };
+    load();
+    window.addEventListener("storage", load);
+    return () => window.removeEventListener("storage", load);
+  }, []);
+
+  // Apply edits then sort ascending by date
   const sortedRows = useMemo(
-    () => [...dailyRows].sort((a, b) => a.date.localeCompare(b.date)),
-    [dailyRows]
+    () => [...dailyRows].map((r) => applyEdits(r, edits)).sort((a, b) => a.date.localeCompare(b.date)),
+    [dailyRows, edits]
   );
   const n = sortedRows.length;
 
@@ -203,50 +214,49 @@ export default function DashboardView({ dailyRows }: Props) {
       <div className="flex gap-5">
         {/* ── Left Sidebar ── */}
         <aside className="w-52 flex-shrink-0 space-y-3">
-          {/* Metric toggles */}
+          {/* Metric toggles grouped */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 pt-4 pb-1">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">Metrics</p>
-            </div>
-            <div className="pb-2">
-              {METRICS.map((m) => {
-                const isOn = selected.has(m.key);
-                const sd = seriesData.find((s) => s.metric.key === m.key);
-                return (
-                  <button
-                    key={m.key}
-                    onClick={() =>
-                      setSelected((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(m.key)) next.delete(m.key);
-                        else next.add(m.key);
-                        return next;
-                      })
-                    }
-                    className={`w-full text-left px-4 py-2.5 flex items-center gap-2.5 transition-all ${
-                      isOn ? "bg-gray-50/80" : "hover:bg-gray-50/40"
-                    }`}
-                  >
-                    <span
-                      className="w-2.5 h-2.5 rounded-full flex-shrink-0 transition-opacity"
-                      style={{ background: m.color, opacity: isOn ? 1 : 0.2 }}
-                    />
-                    <span
-                      className={`text-xs font-medium flex-1 transition-colors ${
-                        isOn ? "text-gray-800" : "text-gray-400"
+            {METRIC_GROUPS.map((group, gi) => (
+              <div key={group.label} className={gi > 0 ? "border-t border-gray-50" : ""}>
+                <div className="px-4 pt-3 pb-1">
+                  <p className="text-[9px] font-semibold uppercase tracking-widest text-gray-300">{group.label}</p>
+                </div>
+                {group.metrics.map((m) => {
+                  const isOn = selected.has(m.key);
+                  const sd = seriesData.find((s) => s.metric.key === m.key);
+                  return (
+                    <button
+                      key={m.key}
+                      onClick={() =>
+                        setSelected((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(m.key)) next.delete(m.key);
+                          else next.add(m.key);
+                          return next;
+                        })
+                      }
+                      className={`w-full text-left px-4 py-2 flex items-center gap-2.5 transition-all ${
+                        isOn ? "bg-gray-50/80" : "hover:bg-gray-50/40"
                       }`}
                     >
-                      {m.label}
-                    </span>
-                    {isOn && sd && (
-                      <span className="text-[10px] text-gray-400 tabular-nums">
-                        {fmtVal(sd.max, m.format)}
+                      <span
+                        className="w-2.5 h-2.5 rounded-full flex-shrink-0 transition-opacity"
+                        style={{ background: m.color, opacity: isOn ? 1 : 0.2 }}
+                      />
+                      <span className={`text-xs font-medium flex-1 transition-colors ${isOn ? "text-gray-800" : "text-gray-400"}`}>
+                        {m.label}
                       </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                      {isOn && sd && (
+                        <span className="text-[10px] text-gray-400 tabular-nums">
+                          {fmtVal(sd.max, m.format)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            <div className="pb-2" />
           </div>
 
           {/* 7-day lag panel — only shown when a laggable metric is selected */}
