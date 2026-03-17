@@ -256,9 +256,14 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
   );
 
   const missingCols = DAILY_COLUMNS.filter((c) => c.requiredMissing);
-  const hasMissingRequired = useMemo(
-    () => editedRows.some((r) => r.viewers_teen === null),
+  // Only warn about missing required cols if the user has actually entered spend data
+  const hasAnySpendData = useMemo(
+    () => editedRows.some((r) => r.tiktok_spend !== null),
     [editedRows]
+  );
+  const hasMissingRequired = useMemo(
+    () => hasAnySpendData && editedRows.some((r) => r.viewers_teen === null),
+    [editedRows, hasAnySpendData]
   );
 
   // All aggregated rows (most recent first)
@@ -366,19 +371,8 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
         )}
       </div>
 
-      {/* Empty state */}
-      {dailyRows.length === 0 && (
-        <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
-          <p className="text-gray-400 mb-3">No daily data imported yet</p>
-          <a href="/v2/import" className="text-violet-600 font-semibold text-sm hover:underline">
-            Go to Import →
-          </a>
-        </div>
-      )}
-
       {/* Table */}
-      {dailyRows.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse" style={{ minWidth: colCount * 120 }}>
               <thead>
@@ -525,7 +519,6 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
             </div>
           </div>
         </div>
-      )}
-    </div>
+      </div>
   );
 }
