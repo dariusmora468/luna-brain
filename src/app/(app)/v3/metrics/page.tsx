@@ -4,6 +4,46 @@ import MetricsView from "../../v2/metrics/MetricsView";
 
 export const dynamic = "force-dynamic";
 
+// Generate an empty scaffold row for a given YYYY-MM-DD date
+function emptyRow(dateStr: string): DailyActualsRow {
+  return {
+    date: dateStr,
+    tiktok_spend: null,
+    teen_spend: null,
+    parent_spend: null,
+    adjust_total_installs: null,
+    est_paid_installs: null,
+    teen_installs: null,
+    parent_installs: null,
+    new_paid_subs: null,
+    revenue: null,
+    mrr: null,
+    viewers_teen: null,
+    viewers_parent: null,
+    trials_teen: null,
+    trials_parent: null,
+    tiktok_reported_installs: null,
+    mixpanel_installs: null,
+    raw: { Date: dateStr },
+  };
+}
+
+// Build every date from 2026-01-01 to today (UTC)
+function buildDateScaffold(): DailyActualsRow[] {
+  const rows: DailyActualsRow[] = [];
+  const cur = new Date(Date.UTC(2026, 0, 1));
+  const today = new Date();
+  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  while (cur <= end) {
+    const y = cur.getUTCFullYear();
+    const m = String(cur.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(cur.getUTCDate()).padStart(2, "0");
+    rows.push(emptyRow(`${y}-${m}-${d}`));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return rows;
+}
+
 export default async function V3MetricsPage() {
   const supabase = createServerClient();
 
@@ -29,9 +69,16 @@ export default async function V3MetricsPage() {
     );
   }
 
-  const dailyRows: DailyActualsRow[] = (dailyResult.data ?? [])
-    .map((r) => parseDailyActualsRow(r.data as Record<string, string>))
-    .filter(Boolean) as DailyActualsRow[];
+  // Parse DB rows into a map keyed by date
+  const dbMap = new Map<string, DailyActualsRow>();
+  for (const r of dailyResult.data ?? []) {
+    const parsed = parseDailyActualsRow(r.data as Record<string, string>);
+    if (parsed) dbMap.set(parsed.date, parsed);
+  }
+
+  // Merge scaffold with DB data (DB takes precedence)
+  const scaffold = buildDateScaffold();
+  const dailyRows: DailyActualsRow[] = scaffold.map((s) => dbMap.get(s.date) ?? s);
 
   let projectedLtv: number | null = null;
   if (monthlyResult.data?.[0]) {
