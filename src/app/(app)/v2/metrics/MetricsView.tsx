@@ -1,27 +1,21 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { DailyActualsRow } from "@/lib/v2/parsers";
-import { DAILY_COLUMNS, REQUIRED_MISSING_KEYS, AGGREGATE_MODE, ColumnDef } from "@/lib/v2/column-definitions";
+import { DAILY_COLUMNS, REQUIRED_MISSING_KEYS, ColumnDef } from "@/lib/v2/column-definitions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   dailyRows: DailyActualsRow[];
-  /** Latest projected LTV from the monthly sheet — used to compute LTV:CAC */
   projectedLtv: number | null;
 }
 
 type Granularity = "daily" | "weekly" | "monthly" | "quarterly";
 
-type RangeKey =
-  | "1d" | "7d" | "30d" | "90d"          // daily
-  | "4w" | "12w"                          // weekly
-  | "3m" | "6m" | "12m"                  // monthly
-  | "2q" | "4q";                          // quarterly
-
 interface AggregatedRow {
   periodLabel: string;
+  date?: string; // only set in daily mode (for edit keying)
   tiktok_spend: number | null;
   teen_spend: number | null;
   parent_spend: number | null;
@@ -35,8 +29,10 @@ interface AggregatedRow {
   trials_parent: number | null;
   cac_computed: number | null;
   ltv_cac_computed: number | null;
-  [key: string]: string | number | null;
+  [key: string]: string | number | null | undefined;
 }
+
+const LS_KEY = "luna-v3-metrics-edits";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -55,7 +51,7 @@ function fmtRatio(v: number | null): string {
   return `${v.toFixed(2)}x`;
 }
 
-function fmtCell(v: string | number | null, format: ColumnDef["format"]): string {
+function fmtCell(v: string | number | null | undefined, format: ColumnDef["format"]): string {
   if (v === null || v === undefined) return "—";
   if (typeof v === "string") return v;
   switch (format) {
@@ -71,14 +67,12 @@ function sumOrNull(values: (number | null)[]): number | null {
   return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) : null;
 }
 
-// Parse date string "YYYY-MM-DD" to a Date, avoiding timezone shift
 function parseDate(s: string): Date {
   const [y, m, d] = s.split("-").map(Number);
   return new Date(y, m - 1, d);
 }
 
 function isoWeek(d: Date): string {
-  // Return "YYYY-Www" ISO week string
   const jan4 = new Date(d.getFullYear(), 0, 4);
   const startOfWeek1 = new Date(jan4);
   startOfWeek1.setDate(jan4.getDate() - jan4.getDay() + 1);
@@ -96,7 +90,6 @@ function isoQuarter(d: Date): string {
   return `${d.getFullYear()}-Q${q}`;
 }
 
-// Pretty-print period keys
 function labelPeriod(key: string, granularity: Granularity): string {
   if (granularity === "weekly") {
     const [yr, wk] = key.split("-W");
@@ -110,7 +103,21 @@ function labelPeriod(key: string, granularity: Granularity): string {
   if (granularity === "quarterly") {
     return key.replace("-", " ");
   }
-  return key; // daily = YYYY-MM-DD
+  return key;
+}
+
+function applyEdits(row: DailyActualsRow, edits: Record<string, string>): DailyActualsRow {
+  const result = { ...row };
+  for (const col of DAILY_COLUMNS) {
+    if (col.isComputed || col.key === "date") continue;
+    const editKey = `${row.date}:${col.key}`;
+    if (editKey in edits) {
+      const raw = edits[editKey].trim();
+      const num = parseFloat(raw.replace(/[£,]/g, ""));
+      (result as Record<string, unknown>)[col.key] = raw === "" ? null : isNaN(num) ? null : num;
+    }
+  }
+  return result;
 }
 
 // ── Aggregation ───────────────────────────────────────────────────────────────
@@ -119,15 +126,14 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
   if (granularity === "daily") {
     return rows.map((r) => {
       const cpi = r.tiktok_spend !== null && r.adjust_total_installs
-        ? r.tiktok_spend / r.adjust_total_installs
-        : null;
+        ? r.tiktok_spend / r.adjust_total_installs : null;
       const cac = r.tiktok_spend !== null && r.new_paid_subs
-        ? r.tiktok_spend / r.new_paid_subs
-        : null;
+        ? r.tiktok_spend / r.new_paid_subs : null;
       const ltv_cac = cac !== null && projectedLtv !== null && cac > 0
         ? projectedLtv / cac : null;
       return {
         periodLabel: r.date,
+        date: r.date,
         tiktok_spend: r.tiktok_spend,
         teen_spend: r.teen_spend,
         parent_spend: r.parent_spend,
@@ -145,7 +151,6 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
     });
   }
 
-  // Group by period key
   const groups = new Map<string, DailyActualsRow[]>();
   for (const r of rows) {
     const d = parseDate(r.date);
@@ -186,17 +191,6 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-const GRANULARITY_RANGES: Record<Granularity, { key: RangeKey; label: string }[]> = {
-  daily:     [{ key: "1d", label: "Yesterday" }, { key: "7d", label: "Last 7 days" }, { key: "30d", label: "Last 30 days" }, { key: "90d", label: "Last 90 days" }],
-  weekly:    [{ key: "4w", label: "Last 4 weeks" }, { key: "12w", label: "Last 12 weeks" }],
-  monthly:   [{ key: "3m", label: "Last 3 months" }, { key: "6m", label: "Last 6 months" }, { key: "12m", label: "Last 12 months" }],
-  quarterly: [{ key: "2q", label: "Last 2 quarters" }, { key: "4q", label: "Last 4 quarters" }],
-};
-
-function rangeCount(key: RangeKey): number {
-  return { "1d": 1, "7d": 7, "30d": 30, "90d": 90, "4w": 4, "12w": 12, "3m": 3, "6m": 6, "12m": 12, "2q": 2, "4q": 4 }[key];
-}
-
 function SourceBadge({ col }: { col: ColumnDef }) {
   if (col.isComputed) {
     return (
@@ -212,7 +206,6 @@ function SourceBadge({ col }: { col: ColumnDef }) {
       </span>
     );
   }
-  // Mixpanel placeholder
   if (col.sourceUrl.includes("mixpanel") || col.source === "Mixpanel") {
     return (
       <span
@@ -242,38 +235,57 @@ function SourceBadge({ col }: { col: ColumnDef }) {
 
 export default function MetricsView({ dailyRows, projectedLtv }: Props) {
   const [granularity, setGranularity] = useState<Granularity>("daily");
-  const [rangeKey, setRangeKey] = useState<RangeKey>("30d");
 
-  // Missing data flags
-  const missingCols = DAILY_COLUMNS.filter((c) => c.requiredMissing);
-  const hasMissingRequired = useMemo(() => {
-    return dailyRows.some((r) =>
-      REQUIRED_MISSING_KEYS.has("viewers_teen") && r.viewers_teen === null
-    );
-  }, [dailyRows]);
+  // Edits stored as { "YYYY-MM-DD:colKey": "raw string value" }
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [editingCell, setEditingCell] = useState<{ date: string; colKey: string } | null>(null);
+  const [editingValue, setEditingValue] = useState<string>("");
 
-  // All aggregated rows
-  const allAggregated = useMemo(
-    () => groupRows([...dailyRows].reverse(), granularity, projectedLtv),
-    [dailyRows, granularity, projectedLtv]
+  // Load edits from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_KEY);
+      if (saved) setEdits(JSON.parse(saved));
+    } catch { /* ignore */ }
+  }, []);
+
+  // Apply edits to dailyRows for aggregation
+  const editedRows = useMemo(
+    () => dailyRows.map((r) => applyEdits(r, edits)),
+    [dailyRows, edits]
   );
 
-  // Slice by range
-  const displayRows = useMemo(() => {
-    const n = rangeCount(rangeKey);
-    return allAggregated.slice(0, n);
-  }, [allAggregated, rangeKey]);
+  const missingCols = DAILY_COLUMNS.filter((c) => c.requiredMissing);
+  const hasMissingRequired = useMemo(
+    () => editedRows.some((r) => r.viewers_teen === null),
+    [editedRows]
+  );
 
-  // Handle granularity switch — set a sensible default range
-  function switchGranularity(g: Granularity) {
-    setGranularity(g);
-    const defaults: Record<Granularity, RangeKey> = {
-      daily: "30d", weekly: "12w", monthly: "6m", quarterly: "4q",
-    };
-    setRangeKey(defaults[g]);
-  }
+  // All aggregated rows (most recent first)
+  const displayRows = useMemo(
+    () => groupRows([...editedRows].reverse(), granularity, projectedLtv),
+    [editedRows, granularity, projectedLtv]
+  );
 
   const GRANULARITIES: Granularity[] = ["daily", "weekly", "monthly", "quarterly"];
+
+  // ── Edit handlers ──────────────────────────────────────────────────────────
+
+  const startEdit = useCallback((date: string, colKey: string, currentDisplay: string) => {
+    setEditingCell({ date, colKey });
+    // Strip formatting for editing (show raw number)
+    const raw = currentDisplay === "—" ? "" : currentDisplay.replace(/[£,x]/g, "");
+    setEditingValue(raw);
+  }, []);
+
+  const commitEdit = useCallback((date: string, colKey: string, value: string) => {
+    setEditingCell(null);
+    const newEdits = { ...edits, [`${date}:${colKey}`]: value };
+    // Remove if empty (revert to original)
+    if (value.trim() === "") delete newEdits[`${date}:${colKey}`];
+    setEdits(newEdits);
+    try { localStorage.setItem(LS_KEY, JSON.stringify(newEdits)); } catch { /* ignore */ }
+  }, [edits]);
 
   const colCount = DAILY_COLUMNS.length;
 
@@ -282,15 +294,15 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-semibold uppercase tracking-widest text-amber-500">V3</span>
+          <span className="text-xs font-semibold uppercase tracking-widest text-violet-500">V3</span>
           <span className="text-xs text-gray-300">/</span>
           <span className="text-xs text-gray-400">Metrics</span>
         </div>
         <h1 className="text-2xl font-bold text-gray-900">Metrics</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Daily actuals with definitions and source links. CAC and LTV:CAC are highlighted.
+          Daily actuals. Click any cell to edit.{" "}
           {projectedLtv !== null && (
-            <span className="ml-2 text-amber-600">Projected LTV: {fmtGbp(projectedLtv)} (from latest monthly data)</span>
+            <span className="text-amber-600">Projected LTV: {fmtGbp(projectedLtv)}</span>
           )}
         </p>
       </div>
@@ -305,7 +317,6 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
             <p className="text-sm font-semibold text-amber-800">Missing data for full CAC/LTV analysis</p>
             <p className="text-xs text-amber-700 mt-0.5">
               {missingCols.map((c) => c.label).join(", ")} — cells highlighted in amber.
-              Fill these columns in John&apos;s sheet and re-upload to unlock full conversion funnel.
             </p>
           </div>
         </div>
@@ -315,19 +326,18 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
         <div className="mb-5 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
           <p className="text-sm text-blue-800">
             <span className="font-semibold">LTV:CAC shows — </span>
-            No projected LTV found in monthly data. Upload a Monthly Metric sheet with LTV values to unlock LTV:CAC.
+            No projected LTV found. Upload a Monthly Metric sheet to unlock LTV:CAC.
           </p>
         </div>
       )}
 
-      {/* Time controls */}
-      <div className="flex flex-wrap items-center gap-3 mb-5">
-        {/* Granularity pills */}
+      {/* Granularity tabs */}
+      <div className="flex items-center gap-3 mb-5">
         <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
           {GRANULARITIES.map((g) => (
             <button
               key={g}
-              onClick={() => switchGranularity(g)}
+              onClick={() => setGranularity(g)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all capitalize ${
                 granularity === g
                   ? "bg-white shadow-sm text-gray-900"
@@ -338,30 +348,29 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
             </button>
           ))}
         </div>
-
-        {/* Range buttons */}
-        <div className="flex gap-1.5">
-          {GRANULARITY_RANGES[granularity].map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setRangeKey(key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                rangeKey === key
-                  ? "bg-amber-500 text-white"
-                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {granularity !== "daily" && (
+          <span className="text-[11px] text-gray-400 italic">
+            Read-only in {granularity} view — edit in Daily
+          </span>
+        )}
+        {Object.keys(edits).length > 0 && (
+          <button
+            onClick={() => {
+              setEdits({});
+              try { localStorage.removeItem(LS_KEY); } catch { /* ignore */ }
+            }}
+            className="ml-auto text-[11px] text-gray-400 hover:text-red-500 transition-colors"
+          >
+            Clear all edits ({Object.keys(edits).length})
+          </button>
+        )}
       </div>
 
       {/* Empty state */}
       {dailyRows.length === 0 && (
         <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
           <p className="text-gray-400 mb-3">No daily data imported yet</p>
-          <a href="/v2/import" className="text-amber-600 font-semibold text-sm hover:underline">
+          <a href="/v2/import" className="text-violet-600 font-semibold text-sm hover:underline">
             Go to Import →
           </a>
         </div>
@@ -435,8 +444,12 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
                     className={`border-b border-gray-50 ${ri % 2 !== 0 ? "bg-gray-50/30" : ""}`}
                   >
                     {DAILY_COLUMNS.map((col) => {
+                      const isDaily = granularity === "daily";
+                      const isEditable = isDaily && !col.isComputed && col.key !== "date";
+                      const isEditing = isEditable && editingCell?.date === row.date && editingCell?.colKey === col.key;
+
                       const rawVal = col.key === "date"
-                        ? (row.periodLabel as string)
+                        ? row.periodLabel
                         : (row[col.key] as number | null);
 
                       const displayVal = col.key === "date"
@@ -445,19 +458,46 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
 
                       const isEmpty = rawVal === null && col.key !== "date";
                       const isRequiredMissing = isEmpty && REQUIRED_MISSING_KEYS.has(col.key);
+                      const isEdited = row.date && edits[`${row.date}:${col.key}`] !== undefined;
 
                       return (
                         <td
                           key={col.key}
-                          className={`px-3 py-2 text-xs tabular-nums whitespace-nowrap ${
+                          onClick={() => {
+                            if (isEditable && !isEditing) {
+                              startEdit(row.date!, col.key, displayVal);
+                            }
+                          }}
+                          className={`px-0 py-0 text-xs tabular-nums whitespace-nowrap relative ${
                             col.isCore
                               ? "font-semibold text-amber-800 bg-amber-50/40"
                               : isRequiredMissing
                               ? "bg-amber-100/60 text-amber-600"
                               : "text-gray-700"
-                          }`}
+                          } ${isEditable && !isEditing ? "cursor-text hover:bg-violet-50/60 transition-colors" : ""}`}
                         >
-                          {displayVal}
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              type="text"
+                              value={editingValue}
+                              onChange={(e) => setEditingValue(e.target.value)}
+                              onBlur={() => commitEdit(row.date!, col.key, editingValue)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") commitEdit(row.date!, col.key, editingValue);
+                                if (e.key === "Escape") setEditingCell(null);
+                              }}
+                              className="w-full px-3 py-2 bg-violet-50 border-2 border-violet-400 outline-none text-xs text-gray-900 tabular-nums"
+                              style={{ minWidth: 80 }}
+                            />
+                          ) : (
+                            <span className="block px-3 py-2">
+                              {displayVal}
+                              {isEdited && (
+                                <span className="ml-1 w-1.5 h-1.5 rounded-full bg-violet-400 inline-block align-middle" title="Manually edited" />
+                              )}
+                            </span>
+                          )}
                         </td>
                       );
                     })}
@@ -470,7 +510,7 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
           {/* Footer */}
           <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50/40 flex items-center justify-between">
             <p className="text-[10px] text-gray-400">
-              Showing {displayRows.length} {granularity} row{displayRows.length !== 1 ? "s" : ""} · most recent first
+              {displayRows.length} {granularity} row{displayRows.length !== 1 ? "s" : ""} · most recent first
               {projectedLtv === null && " · LTV:CAC requires projected LTV from monthly sheet"}
             </p>
             <div className="flex items-center gap-3 text-[10px] text-gray-400">
@@ -479,7 +519,8 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
                 Missing data
               </span>
               <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm bg-amber-50 border border-amber-500 inline-block" />★ Core metric
+                <span className="w-1.5 h-1.5 rounded-full bg-violet-400 inline-block" />
+                Edited
               </span>
             </div>
           </div>
