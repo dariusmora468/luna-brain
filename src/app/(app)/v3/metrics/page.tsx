@@ -26,6 +26,7 @@ function emptyRow(dateStr: string): DailyActualsRow {
     installs_us: null,
     installs_uk: null,
     installs_row: null,
+    installs_android: null,
     est_paid_installs: null,
     teen_installs: null,
     parent_installs: null,

@@ -35,6 +35,7 @@ interface AggregatedRow {
   installs_us: number | null;
   installs_uk: number | null;
   installs_row: number | null;
+  installs_android: number | null;
   cpi_computed: number | null;
   new_paid_subs: number | null;
   revenue: number | null;
@@ -314,6 +315,7 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
         installs_us: r.installs_us,
         installs_uk: r.installs_uk,
         installs_row: r.installs_row,
+        installs_android: r.installs_android,
         cpi_computed: cpi,
         new_paid_subs: r.new_paid_subs,
         revenue: r.revenue,
@@ -364,6 +366,7 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
       installs_us:           sumOrNull(group.map((r) => r.installs_us)),
       installs_uk:           sumOrNull(group.map((r) => r.installs_uk)),
       installs_row:          sumOrNull(group.map((r) => r.installs_row)),
+      installs_android:      sumOrNull(group.map((r) => r.installs_android)),
       cpi_computed:          cpi,
       new_paid_subs:         subs,
       revenue:               sumOrNull(group.map((r) => r.revenue)),
