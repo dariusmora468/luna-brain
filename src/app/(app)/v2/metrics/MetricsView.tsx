@@ -39,8 +39,10 @@ interface AggregatedRow {
   cpi_computed: number | null;
   new_paid_subs: number | null;
   revenue: number | null;
-  trials_teen: number | null;
-  trials_parent: number | null;
+  trials_all: number | null;
+  trials_us: number | null;
+  trials_uk: number | null;
+  trials_row: number | null;
   cac_computed: number | null;
   ltv_cac_computed: number | null;
   [key: string]: string | number | null | undefined;
@@ -72,7 +74,16 @@ interface AppStoreReport {
   installs_row: number;
 }
 
-type ParsedReport = TikTokReport | AppStoreReport;
+interface PurchaselyReport {
+  type: "purchasely";
+  date: string;
+  trials_all: number;
+  trials_us: number;
+  trials_uk: number;
+  trials_row: number;
+}
+
+type ParsedReport = TikTokReport | AppStoreReport | PurchaselyReport;
 
 const LS_KEY = "luna-v3-metrics-edits";
 
@@ -283,6 +294,56 @@ async function parseAppStoreReport(file: File): Promise<AppStoreReport[] | null>
   return results.length > 0 ? results : null;
 }
 
+// ── Purchasely Conversion CSV parser ──────────────────────────────────────────
+// Source: Purchasely → Analytics → Conversion report (CSV export)
+// "conversions_to_offer_price" = trial starts (free trial = offer price of £0)
+
+async function parsePurchaselyReport(file: File): Promise<PurchaselyReport[] | null> {
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  const headerIdx = lines.findIndex((l) => l.startsWith("date,"));
+  if (headerIdx === -1) return null;
+
+  const headers = parseCSVLine(lines[headerIdx]);
+  const dateIdx    = headers.indexOf("date");
+  const countryIdx = headers.indexOf("country");
+  const trialsIdx  = headers.indexOf("conversions_to_offer_price");
+  if (dateIdx === -1 || countryIdx === -1 || trialsIdx === -1) return null;
+
+  const byDate = new Map<string, { all: number; us: number; uk: number; row: number }>();
+
+  for (const line of lines.slice(headerIdx + 1)) {
+    const vals = parseCSVLine(line);
+    const rawDate = vals[dateIdx] ?? "";
+    // date format: "2025-12-17 00:00:00" — take first 10 chars
+    const date = rawDate.slice(0, 10);
+    if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
+
+    const trials = parseInt(vals[trialsIdx] ?? "0") || 0;
+    if (trials <= 0) continue;
+
+    const country = vals[countryIdx] ?? "";
+    if (!byDate.has(date)) byDate.set(date, { all: 0, us: 0, uk: 0, row: 0 });
+    const entry = byDate.get(date)!;
+    entry.all += trials;
+    if (country === "US")      entry.us  += trials;
+    else if (country === "GB") entry.uk  += trials;
+    else                       entry.row += trials;
+  }
+
+  if (byDate.size === 0) return null;
+
+  return Array.from(byDate.entries()).map(([date, c]) => ({
+    type: "purchasely" as const,
+    date,
+    trials_all: c.all,
+    trials_us:  c.us,
+    trials_uk:  c.uk,
+    trials_row: c.row,
+  }));
+}
+
 // ── Aggregation ───────────────────────────────────────────────────────────────
 
 function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedLtv: number | null): AggregatedRow[] {
@@ -319,8 +380,10 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
         cpi_computed: cpi,
         new_paid_subs: r.new_paid_subs,
         revenue: r.revenue,
-        trials_teen: r.trials_teen,
-        trials_parent: r.trials_parent,
+        trials_all: r.trials_all,
+        trials_us: r.trials_us,
+        trials_uk: r.trials_uk,
+        trials_row: r.trials_row,
         cac_computed: cac,
         ltv_cac_computed: ltv_cac,
       };
@@ -370,8 +433,10 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
       cpi_computed:          cpi,
       new_paid_subs:         subs,
       revenue:               sumOrNull(group.map((r) => r.revenue)),
-      trials_teen:           sumOrNull(group.map((r) => r.trials_teen)),
-      trials_parent:         sumOrNull(group.map((r) => r.trials_parent)),
+      trials_all:            sumOrNull(group.map((r) => r.trials_all)),
+      trials_us:             sumOrNull(group.map((r) => r.trials_us)),
+      trials_uk:             sumOrNull(group.map((r) => r.trials_uk)),
+      trials_row:            sumOrNull(group.map((r) => r.trials_row)),
       cac_computed:          cac,
       ltv_cac_computed:      ltv_cac,
     };
@@ -438,9 +503,17 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
       accepted.map(async (f): Promise<FileResult> => {
         try {
           if (f.name.endsWith(".csv")) {
-            const reports = await parseAppStoreReport(f);
-            if (!reports) return { status: "error", name: f.name, error: "Unrecognised CSV format — expected App Store Connect downloads report." };
-            return { status: "ready", name: f.name, reports };
+            // Detect Purchasely (lowercase "date," header) vs App Store Connect (uppercase "Date,")
+            const preview = await f.slice(0, 200).text();
+            if (preview.trimStart().startsWith("date,")) {
+              const reports = await parsePurchaselyReport(f);
+              if (!reports) return { status: "error", name: f.name, error: "Unrecognised Purchasely format — expected Conversion report with conversions_to_offer_price column." };
+              return { status: "ready", name: f.name, reports };
+            } else {
+              const reports = await parseAppStoreReport(f);
+              if (!reports) return { status: "error", name: f.name, error: "Unrecognised CSV format — expected App Store Connect downloads report." };
+              return { status: "ready", name: f.name, reports };
+            }
           } else {
             const report = await parseTikTokReport(f);
             if (!report) return { status: "error", name: f.name, error: "Unrecognised format — needs a date in filename and Campaign Report columns." };
@@ -520,9 +593,12 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
                   if (first.type === "tiktok") {
                     const r = first as TikTokReport;
                     return <p className="text-[10px] text-gray-400">{r.date} · {fmtGbp(r.tiktok_spend)} total · Teen {fmtGbp(r.teen_spend)} · Parent {fmtGbp(r.parent_spend)}</p>;
-                  } else {
+                  } else if (first.type === "appstore") {
                     const total = f.reports.reduce((s, r) => s + (r.type === "appstore" ? r.adjust_total_installs : 0), 0);
-                    return <p className="text-[10px] text-gray-400">{f.reports.length} dates · {fmtNum(total)} installs · US + UK + ROW</p>;
+                    return <p className="text-[10px] text-gray-400">{f.reports.length} dates · {fmtNum(total)} iOS installs · US + UK + ROW</p>;
+                  } else {
+                    const total = f.reports.reduce((s, r) => s + (r.type === "purchasely" ? r.trials_all : 0), 0);
+                    return <p className="text-[10px] text-gray-400">{f.reports.length} dates · {fmtNum(total)} total trials · US + UK + ROW</p>;
                   }
                 })()}
                 {f.status === "error" && <p className="text-[10px] text-red-400">{f.error}</p>}
@@ -579,7 +655,7 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
         </div>
         <div>
           <p className="text-sm font-medium text-gray-700">Upload reports to fill in data</p>
-          <p className="text-xs text-gray-400 mt-0.5">TikTok Campaign Reports (.xlsx) or App Store Connect downloads (.csv) — all dates auto-fill</p>
+          <p className="text-xs text-gray-400 mt-0.5">TikTok (.xlsx), App Store Connect installs (.csv), or Purchasely Conversion (.csv) — all dates auto-fill</p>
         </div>
       </div>
     </div>
@@ -651,11 +727,16 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
         newEdits[`${r.date}:parent_spend_us`]  = String(r.parent_spend_us);
         newEdits[`${r.date}:parent_spend_uk`]  = String(r.parent_spend_uk);
         newEdits[`${r.date}:parent_spend_row`] = String(r.parent_spend_row);
-      } else {
+      } else if (r.type === "appstore") {
         newEdits[`${r.date}:adjust_total_installs`] = String(r.adjust_total_installs);
         newEdits[`${r.date}:installs_us`]           = String(r.installs_us);
         newEdits[`${r.date}:installs_uk`]           = String(r.installs_uk);
         newEdits[`${r.date}:installs_row`]          = String(r.installs_row);
+      } else {
+        newEdits[`${r.date}:trials_all`] = String(r.trials_all);
+        newEdits[`${r.date}:trials_us`]  = String(r.trials_us);
+        newEdits[`${r.date}:trials_uk`]  = String(r.trials_uk);
+        newEdits[`${r.date}:trials_row`] = String(r.trials_row);
       }
     }
     setEdits(newEdits);
@@ -669,8 +750,12 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
             teen_spend: r.teen_spend, teen_spend_us: r.teen_spend_us, teen_spend_uk: r.teen_spend_uk, teen_spend_row: r.teen_spend_row,
             parent_spend: r.parent_spend, parent_spend_us: r.parent_spend_us, parent_spend_uk: r.parent_spend_uk, parent_spend_row: r.parent_spend_row,
           }
-        : {
+        : r.type === "appstore"
+        ? {
             adjust_total_installs: r.adjust_total_installs, installs_us: r.installs_us, installs_uk: r.installs_uk, installs_row: r.installs_row,
+          }
+        : {
+            trials_all: r.trials_all, trials_us: r.trials_us, trials_uk: r.trials_uk, trials_row: r.trials_row,
           },
     }));
     fetch("/api/v3/save-edits", {

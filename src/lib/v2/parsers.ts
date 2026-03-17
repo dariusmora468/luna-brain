@@ -44,8 +44,10 @@ export interface DailyActualsRow {
   // Conversion (may be empty)
   viewers_teen: number | null;
   viewers_parent: number | null;
-  trials_teen: number | null;
-  trials_parent: number | null;
+  trials_all: number | null;
+  trials_us: number | null;
+  trials_uk: number | null;
+  trials_row: number | null;
   // CPI source columns (future — null until added to sheet)
   tiktok_reported_installs: number | null; // TikTok Ads Manager reported installs
   mixpanel_installs: number | null;         // Mixpanel first app opens
@@ -89,8 +91,10 @@ export function parseDailyActualsRow(row: Record<string, string>): DailyActualsR
     mrr: num(row["MRR (£)"] ?? row["MRR"] ?? null),
     viewers_teen: num(row["Viewers Teen"] ?? row["Teen Viewers"] ?? row["Viewers: Teen"] ?? null),
     viewers_parent: num(row["Viewers Parent"] ?? row["Parent Viewers"] ?? row["Viewers: Parent"] ?? null),
-    trials_teen: num(row["Trials Teen"] ?? row["Teen Trials"] ?? row["Trials: Teen"] ?? null),
-    trials_parent: num(row["Trials Parent"] ?? row["Parent Trials"] ?? row["Trials: Parent"] ?? null),
+    trials_all: num(row["Trials All"] ?? row["Total Trials"] ?? row["Trials"] ?? null),
+    trials_us: num(row["Trials US"] ?? null),
+    trials_uk: num(row["Trials UK"] ?? null),
+    trials_row: num(row["Trials ROW"] ?? null),
     tiktok_reported_installs: num(row["TikTok Reported Installs"] ?? row["TikTok Attributed Installs"] ?? null),
     mixpanel_installs: num(row["Mixpanel Installs"] ?? row["Mixpanel First App Opens"] ?? null),
     raw: row,

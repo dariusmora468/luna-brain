@@ -140,11 +140,8 @@ export function UnifiedChart({ rows, experiments, showExpOverlay }: Props) {
       // Installs — no daily teen/parent split; always total
       const installs = r.adjust_total_installs;
 
-      // Trials — teen/parent splits available
-      const trials =
-        audience === "teen"   ? r.trials_teen :
-        audience === "parent" ? r.trials_parent :
-        ((r.trials_teen ?? 0) + (r.trials_parent ?? 0)) || null;
+      // Trials — use geo-based totals (no teen/parent split in new schema)
+      const trials = r.trials_all;
 
       // Subs / Revenue — no daily split; always total
       const subscribers = r.new_paid_subs;
