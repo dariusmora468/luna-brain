@@ -159,7 +159,7 @@ interface Props {
 
 function applyEdits(row: DailyActualsRow, edits: Record<string, string>): DailyActualsRow {
   const result = { ...row };
-  const editableKeys = ["tiktok_spend","teen_spend","parent_spend","google_spend","meta_spend","adjust_total_installs","new_paid_subs","revenue","trials_teen","trials_parent"];
+  const editableKeys = ["tiktok_spend","teen_spend","parent_spend","google_spend","meta_spend","adjust_total_installs","new_paid_subs","revenue","trials_all","trials_us","trials_uk","trials_row"];
   for (const key of editableKeys) {
     const editKey = `${row.date}:${key}`;
     if (editKey in edits) {

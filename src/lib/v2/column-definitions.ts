@@ -35,8 +35,7 @@ const META_ADS = "https://adsmanager.facebook.com";
 
 // ── Required missing columns (needed for full CAC/LTV calculation) ────────────
 export const REQUIRED_MISSING_KEYS = new Set([
-  "trials_teen",
-  "trials_parent",
+  "trials_all",
 ]);
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -236,21 +235,36 @@ export const DAILY_COLUMNS: ColumnDef[] = [
   },
   // ── Trials ──
   {
-    key: "trials_teen",
-    label: "Trials Teen",
-    definition: "Trial starts — Teen segment — from Purchasely. Needed for conversion rate.",
+    key: "trials_all",
+    label: "Trials (All)",
+    definition: "Total trial starts across all countries — from Purchasely Conversion report (conversions_to_offer_price).",
     source: "Purchasely",
     sourceUrl: PURCHASELY_SUBSCRIPTIONS,
     requiredMissing: true,
     format: "number",
   },
   {
-    key: "trials_parent",
-    label: "Trials Parent",
-    definition: "Trial starts — Parent segment — from Purchasely.",
+    key: "trials_us",
+    label: "Trials US",
+    definition: "Trial starts in the US — from Purchasely Conversion report.",
     source: "Purchasely",
     sourceUrl: PURCHASELY_SUBSCRIPTIONS,
-    requiredMissing: true,
+    format: "number",
+  },
+  {
+    key: "trials_uk",
+    label: "Trials UK",
+    definition: "Trial starts in the UK — from Purchasely Conversion report.",
+    source: "Purchasely",
+    sourceUrl: PURCHASELY_SUBSCRIPTIONS,
+    format: "number",
+  },
+  {
+    key: "trials_row",
+    label: "Trials ROW",
+    definition: "Trial starts outside US and UK — from Purchasely Conversion report.",
+    source: "Purchasely",
+    sourceUrl: PURCHASELY_SUBSCRIPTIONS,
     format: "number",
   },
   // ── Core metrics ──
@@ -305,8 +319,10 @@ export const AGGREGATE_MODE: Record<string, AggregateMode> = {
   cpi_computed:            "compute_cpi",
   new_paid_subs:           "sum",
   revenue:                 "sum",
-  trials_teen:             "sum",
-  trials_parent:           "sum",
+  trials_all:              "sum",
+  trials_us:               "sum",
+  trials_uk:               "sum",
+  trials_row:              "sum",
   cac_computed:            "compute_cac",
   ltv_cac_computed:        "compute_ltv_cac",
 };
