@@ -31,6 +31,8 @@ const PURCHASELY_CONVERSION =
 const TIKTOK_ADS =
   "https://ads.tiktok.com/i18n/manage/campaign?aadvid=7279002125701595138";
 const ADJUST_DATASCAPE = "https://suite.adjust.com/datascape";
+const GOOGLE_ADS = "https://ads.google.com";
+const META_ADS = "https://adsmanager.facebook.com";
 
 // ── Required missing columns (needed for full CAC/LTV calculation) ────────────
 // These are currently empty in the Daily Actuals sheet.
@@ -54,11 +56,27 @@ export const DAILY_COLUMNS: ColumnDef[] = [
   },
   {
     key: "tiktok_spend",
-    label: "Total Spend (£)",
+    label: "TikTok Spend (£)",
     definition:
       "Total GBP spent on TikTok ads across all campaigns that day.",
     source: "TikTok Ads Manager",
     sourceUrl: TIKTOK_ADS,
+    format: "gbp",
+  },
+  {
+    key: "google_spend",
+    label: "Google Spend (£)",
+    definition: "Total GBP spent on Google Ads (UAC / App campaigns) that day.",
+    source: "Google Ads",
+    sourceUrl: GOOGLE_ADS,
+    format: "gbp",
+  },
+  {
+    key: "meta_spend",
+    label: "Meta Spend (£)",
+    definition: "Total GBP spent on Meta Ads (Facebook + Instagram) that day.",
+    source: "Meta Ads Manager",
+    sourceUrl: META_ADS,
     format: "gbp",
   },
   {
@@ -188,6 +206,8 @@ export type AggregateMode = "sum" | "compute_cpi" | "compute_cac" | "compute_ltv
 export const AGGREGATE_MODE: Record<string, AggregateMode> = {
   date:                    "skip",        // becomes the period label
   tiktok_spend:            "sum",
+  google_spend:            "sum",
+  meta_spend:              "sum",
   teen_spend:              "sum",
   parent_spend:            "sum",
   adjust_total_installs:   "sum",

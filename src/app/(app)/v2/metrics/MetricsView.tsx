@@ -17,6 +17,8 @@ interface AggregatedRow {
   periodLabel: string;
   date?: string; // only set in daily mode (for edit keying)
   tiktok_spend: number | null;
+  google_spend: number | null;
+  meta_spend: number | null;
   teen_spend: number | null;
   parent_spend: number | null;
   adjust_total_installs: number | null;
@@ -135,6 +137,8 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
         periodLabel: r.date,
         date: r.date,
         tiktok_spend: r.tiktok_spend,
+        google_spend: r.google_spend,
+        meta_spend: r.meta_spend,
         teen_spend: r.teen_spend,
         parent_spend: r.parent_spend,
         adjust_total_installs: r.adjust_total_installs,
@@ -173,6 +177,8 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
     return {
       periodLabel: labelPeriod(key, granularity),
       tiktok_spend:          spend,
+      google_spend:          sumOrNull(group.map((r) => r.google_spend)),
+      meta_spend:            sumOrNull(group.map((r) => r.meta_spend)),
       teen_spend:            sumOrNull(group.map((r) => r.teen_spend)),
       parent_spend:          sumOrNull(group.map((r) => r.parent_spend)),
       adjust_total_installs: installs,
