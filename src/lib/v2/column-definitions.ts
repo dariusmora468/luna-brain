@@ -26,8 +26,6 @@ export interface ColumnDef {
 
 const PURCHASELY_SUBSCRIPTIONS =
   "https://console.purchasely.io/app_LqxssVldDI20rClHxeoFUTvC6yoPOr/dashboards/subscriptions";
-const PURCHASELY_CONVERSION =
-  "https://console.purchasely.io/app_LqxssVldDI20rClHxeoFUTvC6yoPOr/dashboards/conversion";
 const TIKTOK_ADS =
   "https://ads.tiktok.com/i18n/manage/campaign?aadvid=7279002125701595138";
 const ADJUST_DATASCAPE = "https://suite.adjust.com/datascape";
@@ -35,10 +33,7 @@ const GOOGLE_ADS = "https://ads.google.com";
 const META_ADS = "https://adsmanager.facebook.com";
 
 // ── Required missing columns (needed for full CAC/LTV calculation) ────────────
-// These are currently empty in the Daily Actuals sheet.
 export const REQUIRED_MISSING_KEYS = new Set([
-  "viewers_teen",
-  "viewers_parent",
   "trials_teen",
   "trials_parent",
 ]);
@@ -54,15 +49,32 @@ export const DAILY_COLUMNS: ColumnDef[] = [
     sourceUrl: null,
     format: "date",
   },
+  // ── TikTok Spend ──
   {
     key: "tiktok_spend",
     label: "TikTok Spend (£)",
-    definition:
-      "Total GBP spent on TikTok ads across all campaigns that day.",
+    definition: "Total GBP spent on TikTok ads across all campaigns that day.",
     source: "TikTok Ads Manager",
     sourceUrl: TIKTOK_ADS,
     format: "gbp",
   },
+  {
+    key: "teen_spend",
+    label: "TikTok Teen Spend (£)",
+    definition: "GBP spent on Teen-targeted TikTok campaigns (UK Teen + US Teen combined).",
+    source: "TikTok Ads Manager",
+    sourceUrl: TIKTOK_ADS,
+    format: "gbp",
+  },
+  {
+    key: "parent_spend",
+    label: "TikTok Parent Spend (£)",
+    definition: "GBP spent on Parent-targeted TikTok campaigns (UK Parent + US Parent combined).",
+    source: "TikTok Ads Manager",
+    sourceUrl: TIKTOK_ADS,
+    format: "gbp",
+  },
+  // ── Other platforms ──
   {
     key: "google_spend",
     label: "Google Spend (£)",
@@ -79,29 +91,12 @@ export const DAILY_COLUMNS: ColumnDef[] = [
     sourceUrl: META_ADS,
     format: "gbp",
   },
-  {
-    key: "teen_spend",
-    label: "Teen Spend (£)",
-    definition:
-      "GBP spent on Teen-targeted TikTok campaigns (UK Teen + US Teen combined).",
-    source: "TikTok Ads Manager",
-    sourceUrl: TIKTOK_ADS,
-    format: "gbp",
-  },
-  {
-    key: "parent_spend",
-    label: "Parent Spend (£)",
-    definition:
-      "GBP spent on Parent-targeted TikTok campaigns (UK Parent + US Parent combined).",
-    source: "TikTok Ads Manager",
-    sourceUrl: TIKTOK_ADS,
-    format: "gbp",
-  },
+  // ── Installs & CPI ──
   {
     key: "adjust_total_installs",
     label: "Total Installs",
     definition:
-      "App installs tracked by Adjust — includes paid (TikTok-attributed) + organic baseline (~200/day). Note: App Store Connect is ground truth for iOS but is delayed 1+ days.",
+      "App installs tracked by Adjust — includes paid + organic baseline (~200/day).",
     source: "Adjust",
     sourceUrl: ADJUST_DATASCAPE,
     format: "number",
@@ -110,17 +105,18 @@ export const DAILY_COLUMNS: ColumnDef[] = [
     key: "cpi_computed",
     label: "CPI (£)",
     definition:
-      "Blended Cost Per Install = Total Spend ÷ Total Installs. Includes organic installs, so this understates true paid CPI.",
+      "Blended Cost Per Install = TikTok Spend ÷ Total Installs. Includes organic installs, so this understates true paid CPI.",
     source: "Computed",
     sourceUrl: null,
     isComputed: true,
     format: "gbp",
   },
+  // ── Subscribers & Revenue ──
   {
     key: "new_paid_subs",
     label: "New Paid Subs",
     definition:
-      "New paying subscribers — 7-day lag applies (trial maturation delay). Pulled from Purchasely subscriptions dashboard.",
+      "New paying subscribers — 7-day lag applies (trial maturation delay). Pulled from Purchasely.",
     source: "Purchasely",
     sourceUrl: PURCHASELY_SUBSCRIPTIONS,
     format: "number",
@@ -133,31 +129,11 @@ export const DAILY_COLUMNS: ColumnDef[] = [
     sourceUrl: PURCHASELY_SUBSCRIPTIONS,
     format: "gbp",
   },
-  {
-    key: "viewers_teen",
-    label: "Viewers Teen",
-    definition:
-      "Paywall viewers — Teen segment — from Purchasely. Currently empty in sheet. Fill from Purchasely conversion dashboard.",
-    source: "Purchasely",
-    sourceUrl: PURCHASELY_CONVERSION,
-    requiredMissing: true,
-    format: "number",
-  },
-  {
-    key: "viewers_parent",
-    label: "Viewers Parent",
-    definition:
-      "Paywall viewers — Parent segment — from Purchasely. Currently empty in sheet.",
-    source: "Purchasely",
-    sourceUrl: PURCHASELY_CONVERSION,
-    requiredMissing: true,
-    format: "number",
-  },
+  // ── Trials ──
   {
     key: "trials_teen",
     label: "Trials Teen",
-    definition:
-      "Trial starts — Teen segment — from Purchasely. Currently empty. Needed for Viewer-to-Trial conversion rate.",
+    definition: "Trial starts — Teen segment — from Purchasely. Needed for conversion rate.",
     source: "Purchasely",
     sourceUrl: PURCHASELY_SUBSCRIPTIONS,
     requiredMissing: true,
@@ -166,18 +142,18 @@ export const DAILY_COLUMNS: ColumnDef[] = [
   {
     key: "trials_parent",
     label: "Trials Parent",
-    definition:
-      "Trial starts — Parent segment — from Purchasely. Currently empty.",
+    definition: "Trial starts — Parent segment — from Purchasely.",
     source: "Purchasely",
     sourceUrl: PURCHASELY_SUBSCRIPTIONS,
     requiredMissing: true,
     format: "number",
   },
+  // ── Core metrics ──
   {
     key: "cac_computed",
     label: "CAC (£)",
     definition:
-      "Customer Acquisition Cost = Total Spend ÷ New Paid Subs (7-day lag). Simplified estimate — full CAC-A method subtracts organic baseline (~67 subs/month) first.",
+      "Customer Acquisition Cost = TikTok Spend ÷ New Paid Subs (7-day lag).",
     source: "Computed",
     sourceUrl: null,
     isCore: true,
@@ -198,26 +174,21 @@ export const DAILY_COLUMNS: ColumnDef[] = [
 ];
 
 // ── Aggregation hints ─────────────────────────────────────────────────────────
-// When rolling up daily rows into weekly/monthly/quarterly buckets, each field
-// should be either summed or re-computed.
-
 export type AggregateMode = "sum" | "compute_cpi" | "compute_cac" | "compute_ltv_cac" | "last" | "skip";
 
 export const AGGREGATE_MODE: Record<string, AggregateMode> = {
-  date:                    "skip",        // becomes the period label
+  date:                    "skip",
   tiktok_spend:            "sum",
-  google_spend:            "sum",
-  meta_spend:              "sum",
   teen_spend:              "sum",
   parent_spend:            "sum",
+  google_spend:            "sum",
+  meta_spend:              "sum",
   adjust_total_installs:   "sum",
-  cpi_computed:            "compute_cpi",  // = spend_sum / installs_sum
+  cpi_computed:            "compute_cpi",
   new_paid_subs:           "sum",
   revenue:                 "sum",
-  viewers_teen:            "sum",
-  viewers_parent:          "sum",
   trials_teen:             "sum",
   trials_parent:           "sum",
-  cac_computed:            "compute_cac",  // = spend_sum / subs_sum
+  cac_computed:            "compute_cac",
   ltv_cac_computed:        "compute_ltv_cac",
 };
