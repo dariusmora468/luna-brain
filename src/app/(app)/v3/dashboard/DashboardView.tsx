@@ -18,6 +18,44 @@ const PAD_L = 16;
 const CW = SVG_W - PAD_L - PAD_R;
 const CH = SVG_H - PAD_T - PAD_B;
 
+// ── Segment types ─────────────────────────────────────────────────────────────
+
+type Country  = "all" | "us" | "uk" | "row";
+type Audience = "all" | "teens" | "parents";
+
+function resolveSpend(r: DailyActualsRow, country: Country, audience: Audience): number | null {
+  if (audience === "teens") {
+    if (country === "us")  return r.teen_spend_us;
+    if (country === "uk")  return r.teen_spend_uk;
+    if (country === "row") return r.teen_spend_row;
+    return r.teen_spend;
+  }
+  if (audience === "parents") {
+    if (country === "us")  return r.parent_spend_us;
+    if (country === "uk")  return r.parent_spend_uk;
+    if (country === "row") return r.parent_spend_row;
+    return r.parent_spend;
+  }
+  if (country === "us")  return r.tiktok_spend_us;
+  if (country === "uk")  return r.tiktok_spend_uk;
+  if (country === "row") return r.tiktok_spend_row;
+  return r.tiktok_spend;
+}
+
+function resolveTeenSpend(r: DailyActualsRow, country: Country): number | null {
+  if (country === "us")  return r.teen_spend_us;
+  if (country === "uk")  return r.teen_spend_uk;
+  if (country === "row") return r.teen_spend_row;
+  return r.teen_spend;
+}
+
+function resolveParentSpend(r: DailyActualsRow, country: Country): number | null {
+  if (country === "us")  return r.parent_spend_us;
+  if (country === "uk")  return r.parent_spend_uk;
+  if (country === "row") return r.parent_spend_row;
+  return r.parent_spend;
+}
+
 // ── Metric config ─────────────────────────────────────────────────────────────
 
 interface MetricConfig {
@@ -73,13 +111,34 @@ function fmtDateShort(s: string): string {
 
 function buildPath(pts: { x: number; y: number; isNull: boolean }[]): string {
   let d = "";
+  let segStart = -1;
+
+  const flush = (end: number) => {
+    const seg = pts.slice(segStart, end + 1).filter((p) => !p.isNull);
+    if (seg.length === 0) return;
+    d += `M ${seg[0].x.toFixed(1)} ${seg[0].y.toFixed(1)}`;
+    for (let j = 1; j < seg.length; j++) {
+      const prev = seg[j - 1];
+      const curr = seg[j];
+      const tension = 0.35;
+      const prevPrev = j >= 2 ? seg[j - 2] : prev;
+      const next = j + 1 < seg.length ? seg[j + 1] : curr;
+      const cp1x = prev.x + (curr.x - prevPrev.x) * tension;
+      const cp1y = prev.y + (curr.y - prevPrev.y) * tension;
+      const cp2x = curr.x - (next.x - prev.x) * tension;
+      const cp2y = curr.y - (next.y - prev.y) * tension;
+      d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${curr.x.toFixed(1)} ${curr.y.toFixed(1)}`;
+    }
+  };
+
   for (let i = 0; i < pts.length; i++) {
-    if (pts[i].isNull) continue;
-    const prevNull = i === 0 || pts[i - 1].isNull;
-    d += prevNull
-      ? `M ${pts[i].x.toFixed(1)} ${pts[i].y.toFixed(1)}`
-      : ` L ${pts[i].x.toFixed(1)} ${pts[i].y.toFixed(1)}`;
+    if (!pts[i].isNull) {
+      if (segStart === -1) segStart = i;
+    } else {
+      if (segStart !== -1) { flush(i - 1); segStart = -1; }
+    }
   }
+  if (segStart !== -1) flush(pts.length - 1);
   return d;
 }
 
@@ -110,6 +169,8 @@ export default function DashboardView({ dailyRows }: Props) {
   const [lagEnabled, setLagEnabled] = useState<Set<string>>(() => new Set());
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
+  const [country, setCountry] = useState<Country>("all");
+  const [audience, setAudience] = useState<Audience>("all");
   const svgRef = useRef<SVGSVGElement>(null);
 
   // Sync edits from localStorage (kept in sync with Metrics sheet)
@@ -135,7 +196,21 @@ export default function DashboardView({ dailyRows }: Props) {
   // Compute a series of SVG points for each metric
   const seriesData = useMemo(() => {
     return METRICS.map((metric) => {
-      const raw = sortedRows.map((r) => metric.getValue(r));
+      // Override getValue for segment-aware spend metrics
+      let getVal = metric.getValue;
+      if (metric.key === "tiktok_spend") {
+        getVal = (r) => resolveSpend(r, country, audience);
+      } else if (metric.key === "teen_spend") {
+        getVal = (r) => resolveTeenSpend(r, country);
+      } else if (metric.key === "parent_spend") {
+        getVal = (r) => resolveParentSpend(r, country);
+      } else if (metric.key === "cpi") {
+        getVal = (r) => { const s = resolveSpend(r, country, audience); return s !== null && r.adjust_total_installs ? s / r.adjust_total_installs : null; };
+      } else if (metric.key === "cac") {
+        getVal = (r) => { const s = resolveSpend(r, country, audience); return s !== null && r.new_paid_subs ? s / r.new_paid_subs : null; };
+      }
+
+      const raw = sortedRows.map((r) => getVal(r));
       const isLagged = lagEnabled.has(metric.key) && metric.hasLag;
 
       // Lag: shift series 7 days back (show tomorrow+7's value at today's x position)
@@ -156,7 +231,7 @@ export default function DashboardView({ dailyRows }: Props) {
 
       return { metric, values, pts, min, max };
     });
-  }, [sortedRows, lagEnabled, n]);
+  }, [sortedRows, lagEnabled, n, country, audience]);
 
   // Hover handler — map mouse X → nearest data index
   const handleMouseMove = useCallback(
@@ -196,6 +271,42 @@ export default function DashboardView({ dailyRows }: Props) {
         <p className="text-sm text-gray-500 mt-1">
           Select metrics to overlay. Toggle 7-day lag to align Revenue and Subscribers with the ad spend that drove them.
         </p>
+      </div>
+
+      {/* ── Segment filters ── */}
+      <div className="flex items-center gap-6 mb-5 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 w-16">Country</span>
+          <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
+            {(["all", "us", "uk", "row"] as Country[]).map((c) => (
+              <button
+                key={c}
+                onClick={() => setCountry(c)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all uppercase ${
+                  country === c ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {c === "all" ? "All" : c.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 w-16">Audience</span>
+          <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
+            {(["all", "teens", "parents"] as Audience[]).map((a) => (
+              <button
+                key={a}
+                onClick={() => setAudience(a)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all capitalize ${
+                  audience === a ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {a === "all" ? "All" : a.charAt(0).toUpperCase() + a.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="flex gap-5">
