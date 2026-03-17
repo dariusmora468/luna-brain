@@ -28,7 +28,8 @@ const PURCHASELY_SUBSCRIPTIONS =
   "https://console.purchasely.io/app_LqxssVldDI20rClHxeoFUTvC6yoPOr/dashboards/subscriptions";
 const TIKTOK_ADS =
   "https://ads.tiktok.com/i18n/manage/campaign?aadvid=7279002125701595138";
-const ADJUST_DATASCAPE = "https://suite.adjust.com/datascape";
+const APP_STORE_CONNECT =
+  "https://appstoreconnect.apple.com/analytics/app/d30/1632059799/metrics?chartType=singleaxis&groupDimensionKey=storefront&measureKey=totalDownloads&zoomType=day";
 const GOOGLE_ADS = "https://ads.google.com";
 const META_ADS = "https://adsmanager.facebook.com";
 
@@ -168,9 +169,33 @@ export const DAILY_COLUMNS: ColumnDef[] = [
     key: "adjust_total_installs",
     label: "Total Installs",
     definition:
-      "App installs tracked by Adjust — includes paid + organic baseline (~200/day).",
-    source: "Adjust",
-    sourceUrl: ADJUST_DATASCAPE,
+      "Total app downloads from App Store Connect — paid + organic, all countries.",
+    source: "App Store Connect",
+    sourceUrl: APP_STORE_CONNECT,
+    format: "number",
+  },
+  {
+    key: "installs_us",
+    label: "Installs US",
+    definition: "App downloads from the US App Store.",
+    source: "App Store Connect",
+    sourceUrl: APP_STORE_CONNECT,
+    format: "number",
+  },
+  {
+    key: "installs_uk",
+    label: "Installs UK",
+    definition: "App downloads from the UK App Store.",
+    source: "App Store Connect",
+    sourceUrl: APP_STORE_CONNECT,
+    format: "number",
+  },
+  {
+    key: "installs_row",
+    label: "Installs ROW",
+    definition: "App downloads from all App Stores outside US and UK.",
+    source: "App Store Connect",
+    sourceUrl: APP_STORE_CONNECT,
     format: "number",
   },
   {
@@ -265,6 +290,9 @@ export const AGGREGATE_MODE: Record<string, AggregateMode> = {
   google_spend:            "sum",
   meta_spend:              "sum",
   adjust_total_installs:   "sum",
+  installs_us:             "sum",
+  installs_uk:             "sum",
+  installs_row:            "sum",
   cpi_computed:            "compute_cpi",
   new_paid_subs:           "sum",
   revenue:                 "sum",
