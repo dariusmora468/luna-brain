@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import * as XLSX from "xlsx";
 import { DailyActualsRow } from "@/lib/v2/parsers";
 import { DAILY_COLUMNS, REQUIRED_MISSING_KEYS, ColumnDef } from "@/lib/v2/column-definitions";
 
@@ -15,7 +16,7 @@ type Granularity = "daily" | "weekly" | "monthly" | "quarterly";
 
 interface AggregatedRow {
   periodLabel: string;
-  date?: string; // only set in daily mode (for edit keying)
+  date?: string;
   tiktok_spend: number | null;
   google_spend: number | null;
   meta_spend: number | null;
@@ -30,6 +31,14 @@ interface AggregatedRow {
   cac_computed: number | null;
   ltv_cac_computed: number | null;
   [key: string]: string | number | null | undefined;
+}
+
+interface ParsedReport {
+  type: "tiktok";
+  date: string;         // YYYY-MM-DD
+  tiktok_spend: number;
+  teen_spend: number;
+  parent_spend: number;
 }
 
 const LS_KEY = "luna-v3-metrics-edits";
@@ -120,6 +129,37 @@ function applyEdits(row: DailyActualsRow, edits: Record<string, string>): DailyA
   return result;
 }
 
+// ── Report parsing ─────────────────────────────────────────────────────────────
+
+async function parseTikTokReport(file: File): Promise<ParsedReport | null> {
+  // Extract date from filename: "...2026-03-16 to 2026-03-16.xlsx"
+  const dateMatch = file.name.match(/(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})/);
+  if (!dateMatch) return null;
+  const date = dateMatch[2]; // use end date
+
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null });
+
+  // Detect TikTok report: must have "Campaign name" and "Cost" columns
+  if (!rows.length || !("Campaign name" in rows[0]) || !("Cost" in rows[0])) return null;
+
+  let total = 0, teen = 0, parent = 0;
+  for (const row of rows) {
+    const name = String(row["Campaign name"] ?? "");
+    // Skip summary row ("Total of X results")
+    if (/^total of \d+/i.test(name)) continue;
+    const cost = typeof row["Cost"] === "number" ? row["Cost"] : parseFloat(String(row["Cost"] ?? "0"));
+    if (isNaN(cost) || cost <= 0) continue;
+    total += cost;
+    if (/teen|teens/i.test(name)) teen += cost;
+    if (/parent|parents/i.test(name)) parent += cost;
+  }
+
+  return { type: "tiktok", date, tiktok_spend: total, teen_spend: teen, parent_spend: parent };
+}
+
 // ── Aggregation ───────────────────────────────────────────────────────────────
 
 function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedLtv: number | null): AggregatedRow[] {
@@ -206,16 +246,6 @@ function SourceBadge({ col }: { col: ColumnDef }) {
       </span>
     );
   }
-  if (col.sourceUrl.includes("mixpanel") || col.source === "Mixpanel") {
-    return (
-      <span
-        className="inline-block px-1.5 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-400 cursor-help"
-        title="Mixpanel URL — Darius to confirm exact funnel with filters"
-      >
-        Mixpanel (URL TBD)
-      </span>
-    );
-  }
   return (
     <a
       href={col.sourceUrl}
@@ -231,17 +261,186 @@ function SourceBadge({ col }: { col: ColumnDef }) {
   );
 }
 
+// ── Upload Zone ────────────────────────────────────────────────────────────────
+
+interface UploadState {
+  status: "idle" | "parsing" | "confirm" | "applied" | "error";
+  report?: ParsedReport;
+  error?: string;
+}
+
+function ReportUploadZone({
+  onApply,
+}: {
+  onApply: (report: ParsedReport) => void;
+}) {
+  const [state, setState] = useState<UploadState>({ status: "idle" });
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = useCallback(async (file: File) => {
+    if (!file.name.endsWith(".xlsx") && !file.name.endsWith(".xls")) {
+      setState({ status: "error", error: "Only .xlsx files are supported." });
+      return;
+    }
+    setState({ status: "parsing" });
+    try {
+      const report = await parseTikTokReport(file);
+      if (!report) {
+        setState({ status: "error", error: "Could not recognise this report. Expected a TikTok Campaign Report (.xlsx) with a date in the filename." });
+        return;
+      }
+      setState({ status: "confirm", report });
+    } catch (e) {
+      setState({ status: "error", error: String(e) });
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  }, [handleFile]);
+
+  if (state.status === "confirm" && state.report) {
+    const r = state.report;
+    return (
+      <div className="mb-5 bg-white border border-violet-200 rounded-xl p-4 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0">
+            <svg className="w-4 h-4 text-violet-600" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-900">TikTok Campaign Report detected</p>
+            <p className="text-xs text-gray-500 mt-0.5">Date: <span className="font-medium text-gray-700">{r.date}</span></p>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="bg-gray-50 rounded-lg px-3 py-2">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wide">TikTok Spend</p>
+                <p className="text-sm font-bold text-gray-900">{fmtGbp(r.tiktok_spend)}</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg px-3 py-2">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wide">Teen Spend</p>
+                <p className="text-sm font-bold text-gray-900">{fmtGbp(r.teen_spend)}</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg px-3 py-2">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wide">Parent Spend</p>
+                <p className="text-sm font-bold text-gray-900">{fmtGbp(r.parent_spend)}</p>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  onApply(r);
+                  setState({ status: "applied", report: r });
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all"
+                style={{ background: "linear-gradient(135deg, #8B5CF6, #6D28D9)" }}
+              >
+                Apply to {r.date}
+              </button>
+              <button
+                onClick={() => setState({ status: "idle" })}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.status === "applied" && state.report) {
+    return (
+      <div className="mb-5 bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-3">
+        <svg className="w-4 h-4 text-green-600 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
+        </svg>
+        <p className="text-sm text-green-800">
+          <span className="font-semibold">TikTok data applied</span> — {state.report.date}: {fmtGbp(state.report.tiktok_spend)} total spend filled in.
+        </p>
+        <button
+          onClick={() => setState({ status: "idle" })}
+          className="ml-auto text-xs text-green-600 hover:text-green-800"
+        >
+          Upload another
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`mb-5 border-2 border-dashed rounded-xl px-5 py-4 transition-all cursor-pointer ${
+        dragging
+          ? "border-violet-400 bg-violet-50"
+          : state.status === "error"
+          ? "border-red-300 bg-red-50"
+          : "border-gray-200 bg-white hover:border-violet-300 hover:bg-violet-50/40"
+      }`}
+      onClick={() => inputRef.current?.click()}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={handleDrop}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+      />
+      <div className="flex items-center gap-3">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          state.status === "error" ? "bg-red-100" : "bg-violet-100"
+        }`}>
+          {state.status === "parsing" ? (
+            <svg className="w-4 h-4 text-violet-500 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+          ) : state.status === "error" ? (
+            <svg className="w-4 h-4 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 text-violet-500" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd"/>
+            </svg>
+          )}
+        </div>
+        <div>
+          {state.status === "error" ? (
+            <>
+              <p className="text-sm font-medium text-red-700">{state.error}</p>
+              <p className="text-xs text-red-500 mt-0.5">Click to try again</p>
+            </>
+          ) : state.status === "parsing" ? (
+            <p className="text-sm text-violet-600 font-medium">Reading report…</p>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-gray-700">Upload a report to fill in data</p>
+              <p className="text-xs text-gray-400 mt-0.5">Drop a TikTok Campaign Report (.xlsx) here — date, spend and breakdown will auto-fill</p>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function MetricsView({ dailyRows, projectedLtv }: Props) {
   const [granularity, setGranularity] = useState<Granularity>("daily");
-
-  // Edits stored as { "YYYY-MM-DD:colKey": "raw string value" }
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [editingCell, setEditingCell] = useState<{ date: string; colKey: string } | null>(null);
   const [editingValue, setEditingValue] = useState<string>("");
 
-  // Load edits from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem(LS_KEY);
@@ -249,24 +448,11 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
     } catch { /* ignore */ }
   }, []);
 
-  // Apply edits to dailyRows for aggregation
   const editedRows = useMemo(
     () => dailyRows.map((r) => applyEdits(r, edits)),
     [dailyRows, edits]
   );
 
-  const missingCols = DAILY_COLUMNS.filter((c) => c.requiredMissing);
-  // Only warn about missing required cols if the user has actually entered spend data
-  const hasAnySpendData = useMemo(
-    () => editedRows.some((r) => r.tiktok_spend !== null),
-    [editedRows]
-  );
-  const hasMissingRequired = useMemo(
-    () => hasAnySpendData && editedRows.some((r) => r.viewers_teen === null),
-    [editedRows, hasAnySpendData]
-  );
-
-  // All aggregated rows (most recent first)
   const displayRows = useMemo(
     () => groupRows([...editedRows].reverse(), granularity, projectedLtv),
     [editedRows, granularity, projectedLtv]
@@ -274,11 +460,8 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
 
   const GRANULARITIES: Granularity[] = ["daily", "weekly", "monthly", "quarterly"];
 
-  // ── Edit handlers ──────────────────────────────────────────────────────────
-
   const startEdit = useCallback((date: string, colKey: string, currentDisplay: string) => {
     setEditingCell({ date, colKey });
-    // Strip formatting for editing (show raw number)
     const raw = currentDisplay === "—" ? "" : currentDisplay.replace(/[£,x]/g, "");
     setEditingValue(raw);
   }, []);
@@ -286,8 +469,16 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
   const commitEdit = useCallback((date: string, colKey: string, value: string) => {
     setEditingCell(null);
     const newEdits = { ...edits, [`${date}:${colKey}`]: value };
-    // Remove if empty (revert to original)
     if (value.trim() === "") delete newEdits[`${date}:${colKey}`];
+    setEdits(newEdits);
+    try { localStorage.setItem(LS_KEY, JSON.stringify(newEdits)); } catch { /* ignore */ }
+  }, [edits]);
+
+  const applyReport = useCallback((report: ParsedReport) => {
+    const newEdits = { ...edits };
+    newEdits[`${report.date}:tiktok_spend`] = String(report.tiktok_spend);
+    newEdits[`${report.date}:teen_spend`]   = String(report.teen_spend);
+    newEdits[`${report.date}:parent_spend`] = String(report.parent_spend);
     setEdits(newEdits);
     try { localStorage.setItem(LS_KEY, JSON.stringify(newEdits)); } catch { /* ignore */ }
   }, [edits]);
@@ -312,29 +503,8 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
         </p>
       </div>
 
-      {/* Missing data banner */}
-      {hasMissingRequired && (
-        <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3">
-          <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd"/>
-          </svg>
-          <div>
-            <p className="text-sm font-semibold text-amber-800">Missing data for full CAC/LTV analysis</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              {missingCols.map((c) => c.label).join(", ")} — cells highlighted in amber.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {projectedLtv === null && (
-        <div className="mb-5 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
-          <p className="text-sm text-blue-800">
-            <span className="font-semibold">LTV:CAC shows — </span>
-            No projected LTV found. Upload a Monthly Metric sheet to unlock LTV:CAC.
-          </p>
-        </div>
-      )}
+      {/* Report upload zone */}
+      <ReportUploadZone onApply={applyReport} />
 
       {/* Granularity tabs */}
       <div className="flex items-center gap-3 mb-5">
@@ -373,152 +543,151 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
 
       {/* Table */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse" style={{ minWidth: colCount * 120 }}>
-              <thead>
-                {/* Row 1: Column names */}
-                <tr className="border-b border-gray-100">
-                  {DAILY_COLUMNS.map((col) => (
-                    <th
-                      key={col.key}
-                      className={`px-3 pt-3 pb-1 text-left text-xs font-semibold whitespace-nowrap ${
-                        col.isCore
-                          ? "bg-amber-50 text-amber-800"
-                          : col.requiredMissing
-                          ? "bg-amber-50/60 text-gray-700"
-                          : "bg-white text-gray-800"
-                      }`}
-                    >
-                      {col.label}
-                      {col.requiredMissing && (
-                        <span className="ml-1 text-amber-500" title="Missing — needed for CAC/LTV">●</span>
-                      )}
-                      {col.isCore && (
-                        <span className="ml-1 text-amber-600" title="Core metric">★</span>
-                      )}
-                    </th>
-                  ))}
-                </tr>
-
-                {/* Row 2: Definitions */}
-                <tr className="border-b border-gray-100">
-                  {DAILY_COLUMNS.map((col) => (
-                    <td
-                      key={col.key}
-                      className={`px-3 py-1.5 text-left align-top ${
-                        col.isCore ? "bg-amber-50/60" : col.requiredMissing ? "bg-amber-50/40" : "bg-gray-50/50"
-                      }`}
-                    >
-                      <p className="text-[10px] text-gray-500 leading-relaxed max-w-[180px]">
-                        {col.definition}
-                      </p>
-                    </td>
-                  ))}
-                </tr>
-
-                {/* Row 3: Source badges */}
-                <tr className="border-b-2 border-gray-200">
-                  {DAILY_COLUMNS.map((col) => (
-                    <td
-                      key={col.key}
-                      className={`px-3 py-2 ${
-                        col.isCore ? "bg-amber-50/60" : col.requiredMissing ? "bg-amber-50/40" : "bg-gray-50/50"
-                      }`}
-                    >
-                      <SourceBadge col={col} />
-                    </td>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {displayRows.map((row, ri) => (
-                  <tr
-                    key={row.periodLabel}
-                    className={`border-b border-gray-50 ${ri % 2 !== 0 ? "bg-gray-50/30" : ""}`}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" style={{ minWidth: colCount * 120 }}>
+            <thead>
+              {/* Row 1: Column names */}
+              <tr className="border-b border-gray-100">
+                {DAILY_COLUMNS.map((col) => (
+                  <th
+                    key={col.key}
+                    className={`px-3 pt-3 pb-1 text-left text-xs font-semibold whitespace-nowrap ${
+                      col.isCore
+                        ? "bg-amber-50 text-amber-800"
+                        : col.requiredMissing
+                        ? "bg-amber-50/60 text-gray-700"
+                        : "bg-white text-gray-800"
+                    }`}
                   >
-                    {DAILY_COLUMNS.map((col) => {
-                      const isDaily = granularity === "daily";
-                      const isEditable = isDaily && !col.isComputed && col.key !== "date";
-                      const isEditing = isEditable && editingCell?.date === row.date && editingCell?.colKey === col.key;
-
-                      const rawVal = col.key === "date"
-                        ? row.periodLabel
-                        : (row[col.key] as number | null);
-
-                      const displayVal = col.key === "date"
-                        ? row.periodLabel
-                        : fmtCell(rawVal as number | null, col.format);
-
-                      const isEmpty = rawVal === null && col.key !== "date";
-                      const isRequiredMissing = isEmpty && REQUIRED_MISSING_KEYS.has(col.key);
-                      const isEdited = row.date && edits[`${row.date}:${col.key}`] !== undefined;
-
-                      return (
-                        <td
-                          key={col.key}
-                          onClick={() => {
-                            if (isEditable && !isEditing) {
-                              startEdit(row.date!, col.key, displayVal);
-                            }
-                          }}
-                          className={`px-0 py-0 text-xs tabular-nums whitespace-nowrap relative ${
-                            col.isCore
-                              ? "font-semibold text-amber-800 bg-amber-50/40"
-                              : isRequiredMissing
-                              ? "bg-amber-100/60 text-amber-600"
-                              : "text-gray-700"
-                          } ${isEditable && !isEditing ? "cursor-text hover:bg-violet-50/60 transition-colors" : ""}`}
-                        >
-                          {isEditing ? (
-                            <input
-                              autoFocus
-                              type="text"
-                              value={editingValue}
-                              onChange={(e) => setEditingValue(e.target.value)}
-                              onBlur={() => commitEdit(row.date!, col.key, editingValue)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") commitEdit(row.date!, col.key, editingValue);
-                                if (e.key === "Escape") setEditingCell(null);
-                              }}
-                              className="w-full px-3 py-2 bg-violet-50 border-2 border-violet-400 outline-none text-xs text-gray-900 tabular-nums"
-                              style={{ minWidth: 80 }}
-                            />
-                          ) : (
-                            <span className="block px-3 py-2">
-                              {displayVal}
-                              {isEdited && (
-                                <span className="ml-1 w-1.5 h-1.5 rounded-full bg-violet-400 inline-block align-middle" title="Manually edited" />
-                              )}
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
+                    {col.label}
+                    {col.requiredMissing && (
+                      <span className="ml-1 text-amber-500" title="Missing — needed for CAC/LTV">●</span>
+                    )}
+                    {col.isCore && (
+                      <span className="ml-1 text-amber-600" title="Core metric">★</span>
+                    )}
+                  </th>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </tr>
 
-          {/* Footer */}
-          <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50/40 flex items-center justify-between">
-            <p className="text-[10px] text-gray-400">
-              {displayRows.length} {granularity} row{displayRows.length !== 1 ? "s" : ""} · most recent first
-              {projectedLtv === null && " · LTV:CAC requires projected LTV from monthly sheet"}
-            </p>
-            <div className="flex items-center gap-3 text-[10px] text-gray-400">
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm bg-amber-50 border border-amber-300 inline-block" />
-                Missing data
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-violet-400 inline-block" />
-                Edited
-              </span>
-            </div>
+              {/* Row 2: Definitions */}
+              <tr className="border-b border-gray-100">
+                {DAILY_COLUMNS.map((col) => (
+                  <td
+                    key={col.key}
+                    className={`px-3 py-1.5 text-left align-top ${
+                      col.isCore ? "bg-amber-50/60" : col.requiredMissing ? "bg-amber-50/40" : "bg-gray-50/50"
+                    }`}
+                  >
+                    <p className="text-[10px] text-gray-500 leading-relaxed max-w-[180px]">
+                      {col.definition}
+                    </p>
+                  </td>
+                ))}
+              </tr>
+
+              {/* Row 3: Source badges */}
+              <tr className="border-b-2 border-gray-200">
+                {DAILY_COLUMNS.map((col) => (
+                  <td
+                    key={col.key}
+                    className={`px-3 py-2 ${
+                      col.isCore ? "bg-amber-50/60" : col.requiredMissing ? "bg-amber-50/40" : "bg-gray-50/50"
+                    }`}
+                  >
+                    <SourceBadge col={col} />
+                  </td>
+                ))}
+              </tr>
+            </thead>
+
+            <tbody>
+              {displayRows.map((row, ri) => (
+                <tr
+                  key={row.periodLabel}
+                  className={`border-b border-gray-50 ${ri % 2 !== 0 ? "bg-gray-50/30" : ""}`}
+                >
+                  {DAILY_COLUMNS.map((col) => {
+                    const isDaily = granularity === "daily";
+                    const isEditable = isDaily && !col.isComputed && col.key !== "date";
+                    const isEditing = isEditable && editingCell?.date === row.date && editingCell?.colKey === col.key;
+
+                    const rawVal = col.key === "date"
+                      ? row.periodLabel
+                      : (row[col.key] as number | null);
+
+                    const displayVal = col.key === "date"
+                      ? row.periodLabel
+                      : fmtCell(rawVal as number | null, col.format);
+
+                    const isEmpty = rawVal === null && col.key !== "date";
+                    const isRequiredMissing = isEmpty && REQUIRED_MISSING_KEYS.has(col.key);
+                    const isEdited = row.date && edits[`${row.date}:${col.key}`] !== undefined;
+
+                    return (
+                      <td
+                        key={col.key}
+                        onClick={() => {
+                          if (isEditable && !isEditing) {
+                            startEdit(row.date!, col.key, displayVal);
+                          }
+                        }}
+                        className={`px-0 py-0 text-xs tabular-nums whitespace-nowrap relative ${
+                          col.isCore
+                            ? "font-semibold text-amber-800 bg-amber-50/40"
+                            : isRequiredMissing
+                            ? "bg-amber-100/60 text-amber-600"
+                            : "text-gray-700"
+                        } ${isEditable && !isEditing ? "cursor-text hover:bg-violet-50/60 transition-colors" : ""}`}
+                      >
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={editingValue}
+                            onChange={(e) => setEditingValue(e.target.value)}
+                            onBlur={() => commitEdit(row.date!, col.key, editingValue)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") commitEdit(row.date!, col.key, editingValue);
+                              if (e.key === "Escape") setEditingCell(null);
+                            }}
+                            className="w-full px-3 py-2 bg-violet-50 border-2 border-violet-400 outline-none text-xs text-gray-900 tabular-nums"
+                            style={{ minWidth: 80 }}
+                          />
+                        ) : (
+                          <span className="block px-3 py-2">
+                            {displayVal}
+                            {isEdited && (
+                              <span className="ml-1 w-1.5 h-1.5 rounded-full bg-violet-400 inline-block align-middle" title="Manually edited" />
+                            )}
+                          </span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50/40 flex items-center justify-between">
+          <p className="text-[10px] text-gray-400">
+            {displayRows.length} {granularity} row{displayRows.length !== 1 ? "s" : ""} · most recent first
+          </p>
+          <div className="flex items-center gap-3 text-[10px] text-gray-400">
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm bg-amber-50 border border-amber-300 inline-block" />
+              Missing data
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 inline-block" />
+              Edited
+            </span>
           </div>
         </div>
       </div>
+    </div>
   );
 }
