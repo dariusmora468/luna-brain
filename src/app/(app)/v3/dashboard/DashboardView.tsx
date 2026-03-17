@@ -183,19 +183,6 @@ export default function DashboardView({ dailyRows }: Props) {
   // X-axis labels: every N days depending on density
   const xLabelStep = n <= 14 ? 1 : n <= 60 ? 7 : n <= 120 ? 14 : 30;
 
-  if (n === 0) {
-    return (
-      <div className="p-6 lg:p-8">
-        <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center">
-          <p className="text-gray-400 mb-3">No daily data imported yet</p>
-          <a href="/v2/import" className="text-violet-600 font-semibold text-sm hover:underline">
-            Go to Import →
-          </a>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="p-6 lg:p-8">
       {/* Header */}
