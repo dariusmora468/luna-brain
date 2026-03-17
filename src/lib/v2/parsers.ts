@@ -29,6 +29,9 @@ export interface DailyActualsRow {
   parent_spend_row: number | null;
   // Installs
   adjust_total_installs: number | null;
+  installs_us: number | null;
+  installs_uk: number | null;
+  installs_row: number | null;
   est_paid_installs: number | null;
   teen_installs: number | null;
   parent_installs: number | null;
@@ -73,6 +76,9 @@ export function parseDailyActualsRow(row: Record<string, string>): DailyActualsR
     parent_spend_uk: num(row["Parent Spend UK (£)"] ?? row["Parent Spend UK"] ?? null),
     parent_spend_row: num(row["Parent Spend ROW (£)"] ?? row["Parent Spend ROW"] ?? null),
     adjust_total_installs: num(row["Adjust Total Installs"] ?? row["Total Installs"] ?? row["Installs"] ?? null),
+    installs_us: num(row["Installs US"] ?? null),
+    installs_uk: num(row["Installs UK"] ?? null),
+    installs_row: num(row["Installs ROW"] ?? null),
     est_paid_installs: num(row["Est. Paid Installs"] ?? row["Estimated Paid Installs"] ?? row["Est. Paid Installs"] ?? row["Paid Installs"] ?? null),
     teen_installs: num(row["Teen Installs"] ?? null),
     parent_installs: num(row["Parent Installs"] ?? null),

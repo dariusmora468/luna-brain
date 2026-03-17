@@ -32,6 +32,9 @@ interface AggregatedRow {
   parent_spend_uk: number | null;
   parent_spend_row: number | null;
   adjust_total_installs: number | null;
+  installs_us: number | null;
+  installs_uk: number | null;
+  installs_row: number | null;
   cpi_computed: number | null;
   new_paid_subs: number | null;
   revenue: number | null;
@@ -42,9 +45,9 @@ interface AggregatedRow {
   [key: string]: string | number | null | undefined;
 }
 
-interface ParsedReport {
+interface TikTokReport {
   type: "tiktok";
-  date: string;         // YYYY-MM-DD
+  date: string;
   tiktok_spend: number;
   tiktok_spend_us: number;
   tiktok_spend_uk: number;
@@ -58,6 +61,17 @@ interface ParsedReport {
   parent_spend_uk: number;
   parent_spend_row: number;
 }
+
+interface AppStoreReport {
+  type: "appstore";
+  date: string;
+  adjust_total_installs: number;
+  installs_us: number;
+  installs_uk: number;
+  installs_row: number;
+}
+
+type ParsedReport = TikTokReport | AppStoreReport;
 
 const LS_KEY = "luna-v3-metrics-edits";
 
@@ -207,6 +221,67 @@ async function parseTikTokReport(file: File): Promise<ParsedReport | null> {
   };
 }
 
+// ── App Store Connect CSV parser ───────────────────────────────────────────────
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let cur = "";
+  let inQ = false;
+  for (const ch of line) {
+    if (ch === '"') { inQ = !inQ; }
+    else if (ch === "," && !inQ) { result.push(cur.trim()); cur = ""; }
+    else cur += ch;
+  }
+  result.push(cur.trim());
+  return result;
+}
+
+async function parseAppStoreReport(file: File): Promise<AppStoreReport[] | null> {
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  // Find header row starting with "Date,"
+  const headerIdx = lines.findIndex((l) => l.startsWith("Date,"));
+  if (headerIdx === -1) return null;
+
+  const headers = parseCSVLine(lines[headerIdx]);
+  const dataLines = lines.slice(headerIdx + 1);
+  if (!dataLines.length) return null;
+
+  const results: AppStoreReport[] = [];
+  for (const line of dataLines) {
+    const vals = parseCSVLine(line);
+    if (!vals[0]) continue;
+
+    // Parse date: M/D/YY or M/D/YYYY
+    const m = vals[0].match(/^(\d+)\/(\d+)\/(\d+)$/);
+    if (!m) continue;
+    const year = m[3].length === 2 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
+    const date = `${year}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+
+    let total = 0, us = 0, uk = 0, row = 0;
+    for (let i = 1; i < headers.length; i++) {
+      const v = parseFloat(vals[i] ?? "0") || 0;
+      if (v <= 0) continue;
+      total += v;
+      if (headers[i].includes("United States")) us += v;
+      else if (headers[i].includes("United Kingdom")) uk += v;
+      else row += v;
+    }
+
+    results.push({
+      type: "appstore",
+      date,
+      adjust_total_installs: Math.round(total),
+      installs_us: Math.round(us),
+      installs_uk: Math.round(uk),
+      installs_row: Math.round(row),
+    });
+  }
+
+  return results.length > 0 ? results : null;
+}
+
 // ── Aggregation ───────────────────────────────────────────────────────────────
 
 function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedLtv: number | null): AggregatedRow[] {
@@ -236,6 +311,9 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
         parent_spend_uk: r.parent_spend_uk,
         parent_spend_row: r.parent_spend_row,
         adjust_total_installs: r.adjust_total_installs,
+        installs_us: r.installs_us,
+        installs_uk: r.installs_uk,
+        installs_row: r.installs_row,
         cpi_computed: cpi,
         new_paid_subs: r.new_paid_subs,
         revenue: r.revenue,
@@ -283,6 +361,9 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
       parent_spend_uk:       sumOrNull(group.map((r) => r.parent_spend_uk)),
       parent_spend_row:      sumOrNull(group.map((r) => r.parent_spend_row)),
       adjust_total_installs: installs,
+      installs_us:           sumOrNull(group.map((r) => r.installs_us)),
+      installs_uk:           sumOrNull(group.map((r) => r.installs_uk)),
+      installs_row:          sumOrNull(group.map((r) => r.installs_row)),
       cpi_computed:          cpi,
       new_paid_subs:         subs,
       revenue:               sumOrNull(group.map((r) => r.revenue)),
@@ -330,7 +411,7 @@ function SourceBadge({ col }: { col: ColumnDef }) {
 
 type FileResult =
   | { status: "parsing"; name: string }
-  | { status: "ready";   name: string; report: ParsedReport }
+  | { status: "ready";   name: string; reports: ParsedReport[] }
   | { status: "error";   name: string; error: string };
 
 type UploadPhase = "idle" | "reviewing" | "applied";
@@ -342,20 +423,26 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
   const inputRef = useRef<HTMLInputElement>(null);
 
   const processFiles = useCallback(async (rawFiles: File[]) => {
-    const xlsx = rawFiles.filter((f) => f.name.endsWith(".xlsx") || f.name.endsWith(".xls"));
-    if (!xlsx.length) return;
+    const accepted = rawFiles.filter((f) =>
+      f.name.endsWith(".xlsx") || f.name.endsWith(".xls") || f.name.endsWith(".csv")
+    );
+    if (!accepted.length) return;
 
-    // Show parsing state immediately
-    setFiles(xlsx.map((f) => ({ status: "parsing", name: f.name })));
+    setFiles(accepted.map((f) => ({ status: "parsing", name: f.name })));
     setPhase("reviewing");
 
-    // Parse all in parallel
     const results = await Promise.all(
-      xlsx.map(async (f): Promise<FileResult> => {
+      accepted.map(async (f): Promise<FileResult> => {
         try {
-          const report = await parseTikTokReport(f);
-          if (!report) return { status: "error", name: f.name, error: "Unrecognised format — needs a date in filename and Campaign Report columns." };
-          return { status: "ready", name: f.name, report };
+          if (f.name.endsWith(".csv")) {
+            const reports = await parseAppStoreReport(f);
+            if (!reports) return { status: "error", name: f.name, error: "Unrecognised CSV format — expected App Store Connect downloads report." };
+            return { status: "ready", name: f.name, reports };
+          } else {
+            const report = await parseTikTokReport(f);
+            if (!report) return { status: "error", name: f.name, error: "Unrecognised format — needs a date in filename and Campaign Report columns." };
+            return { status: "ready", name: f.name, reports: [report] };
+          }
         } catch (e) {
           return { status: "error", name: f.name, error: String(e) };
         }
@@ -370,8 +457,9 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
     processFiles(Array.from(e.dataTransfer.files));
   }, [processFiles]);
 
-  const readyReports = files.filter((f): f is Extract<FileResult, { status: "ready" }> => f.status === "ready");
+  const readyFiles = files.filter((f): f is Extract<FileResult, { status: "ready" }> => f.status === "ready");
   const isParsing = files.some((f) => f.status === "parsing");
+  const totalReports = readyFiles.reduce((s, f) => s + f.reports.length, 0);
 
   // ── Applied summary ──
   if (phase === "applied") {
@@ -381,9 +469,9 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
           <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
         </svg>
         <p className="text-sm text-green-800">
-          <span className="font-semibold">{readyReports.length} report{readyReports.length !== 1 ? "s" : ""} applied</span>
+          <span className="font-semibold">{readyFiles.length} file{readyFiles.length !== 1 ? "s" : ""} applied</span>
           {" — "}
-          {readyReports.map((f) => f.report.date).sort().join(", ")}
+          {totalReports} date{totalReports !== 1 ? "s" : ""} updated
         </p>
         <button onClick={() => { setPhase("idle"); setFiles([]); }} className="ml-auto text-xs text-green-600 hover:text-green-800">
           Upload more
@@ -398,7 +486,7 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
       <div className="mb-5 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-4 pt-3 pb-2 border-b border-gray-100 flex items-center justify-between">
           <p className="text-sm font-semibold text-gray-800">
-            {isParsing ? "Reading files…" : `${readyReports.length} of ${files.length} file${files.length !== 1 ? "s" : ""} ready`}
+            {isParsing ? "Reading files…" : `${readyFiles.length} of ${files.length} file${files.length !== 1 ? "s" : ""} ready`}
           </p>
           <button onClick={() => { setPhase("idle"); setFiles([]); }} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
         </div>
@@ -424,28 +512,33 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
               )}
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-gray-600 truncate">{f.name}</p>
-                {f.status === "ready" && (
-                  <p className="text-[10px] text-gray-400">
-                    {f.report.date} · {fmtGbp(f.report.tiktok_spend)} total · Teen {fmtGbp(f.report.teen_spend)} · Parent {fmtGbp(f.report.parent_spend)}
-                  </p>
-                )}
+                {f.status === "ready" && (() => {
+                  const first = f.reports[0];
+                  if (first.type === "tiktok") {
+                    const r = first as TikTokReport;
+                    return <p className="text-[10px] text-gray-400">{r.date} · {fmtGbp(r.tiktok_spend)} total · Teen {fmtGbp(r.teen_spend)} · Parent {fmtGbp(r.parent_spend)}</p>;
+                  } else {
+                    const total = f.reports.reduce((s, r) => s + (r.type === "appstore" ? r.adjust_total_installs : 0), 0);
+                    return <p className="text-[10px] text-gray-400">{f.reports.length} dates · {fmtNum(total)} installs · US + UK + ROW</p>;
+                  }
+                })()}
                 {f.status === "error" && <p className="text-[10px] text-red-400">{f.error}</p>}
               </div>
             </div>
           ))}
         </div>
 
-        {!isParsing && readyReports.length > 0 && (
+        {!isParsing && readyFiles.length > 0 && (
           <div className="px-4 py-3 border-t border-gray-100 flex items-center gap-2">
             <button
               onClick={() => {
-                onApply(readyReports.map((f) => f.report));
+                onApply(readyFiles.flatMap((f) => f.reports));
                 setPhase("applied");
               }}
               className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white transition-all"
               style={{ background: "linear-gradient(135deg, #8B5CF6, #6D28D9)" }}
             >
-              Apply {readyReports.length} report{readyReports.length !== 1 ? "s" : ""} to sheet
+              Apply {readyFiles.length} file{readyFiles.length !== 1 ? "s" : ""} to sheet
             </button>
             <span className="text-[11px] text-gray-400">
               Fills TikTok Spend, Teen Spend, Parent Spend for each date
@@ -470,7 +563,7 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
       <input
         ref={inputRef}
         type="file"
-        accept=".xlsx,.xls"
+        accept=".xlsx,.xls,.csv"
         multiple
         className="hidden"
         onChange={(e) => { if (e.target.files?.length) processFiles(Array.from(e.target.files)); e.target.value = ""; }}
@@ -482,8 +575,8 @@ function ReportUploadZone({ onApply }: { onApply: (reports: ParsedReport[]) => v
           </svg>
         </div>
         <div>
-          <p className="text-sm font-medium text-gray-700">Upload TikTok reports to fill in data</p>
-          <p className="text-xs text-gray-400 mt-0.5">Drop one or multiple Campaign Report (.xlsx) files — all dates auto-fill at once</p>
+          <p className="text-sm font-medium text-gray-700">Upload reports to fill in data</p>
+          <p className="text-xs text-gray-400 mt-0.5">TikTok Campaign Reports (.xlsx) or App Store Connect downloads (.csv) — all dates auto-fill</p>
         </div>
       </div>
     </div>
@@ -542,29 +635,40 @@ export default function MetricsView({ dailyRows, projectedLtv }: Props) {
   const applyReport = useCallback((reports: ParsedReport[]) => {
     const newEdits = { ...edits };
     for (const r of reports) {
-      newEdits[`${r.date}:tiktok_spend`]     = String(r.tiktok_spend);
-      newEdits[`${r.date}:tiktok_spend_us`]  = String(r.tiktok_spend_us);
-      newEdits[`${r.date}:tiktok_spend_uk`]  = String(r.tiktok_spend_uk);
-      newEdits[`${r.date}:tiktok_spend_row`] = String(r.tiktok_spend_row);
-      newEdits[`${r.date}:teen_spend`]       = String(r.teen_spend);
-      newEdits[`${r.date}:teen_spend_us`]    = String(r.teen_spend_us);
-      newEdits[`${r.date}:teen_spend_uk`]    = String(r.teen_spend_uk);
-      newEdits[`${r.date}:teen_spend_row`]   = String(r.teen_spend_row);
-      newEdits[`${r.date}:parent_spend`]     = String(r.parent_spend);
-      newEdits[`${r.date}:parent_spend_us`]  = String(r.parent_spend_us);
-      newEdits[`${r.date}:parent_spend_uk`]  = String(r.parent_spend_uk);
-      newEdits[`${r.date}:parent_spend_row`] = String(r.parent_spend_row);
+      if (r.type === "tiktok") {
+        newEdits[`${r.date}:tiktok_spend`]     = String(r.tiktok_spend);
+        newEdits[`${r.date}:tiktok_spend_us`]  = String(r.tiktok_spend_us);
+        newEdits[`${r.date}:tiktok_spend_uk`]  = String(r.tiktok_spend_uk);
+        newEdits[`${r.date}:tiktok_spend_row`] = String(r.tiktok_spend_row);
+        newEdits[`${r.date}:teen_spend`]       = String(r.teen_spend);
+        newEdits[`${r.date}:teen_spend_us`]    = String(r.teen_spend_us);
+        newEdits[`${r.date}:teen_spend_uk`]    = String(r.teen_spend_uk);
+        newEdits[`${r.date}:teen_spend_row`]   = String(r.teen_spend_row);
+        newEdits[`${r.date}:parent_spend`]     = String(r.parent_spend);
+        newEdits[`${r.date}:parent_spend_us`]  = String(r.parent_spend_us);
+        newEdits[`${r.date}:parent_spend_uk`]  = String(r.parent_spend_uk);
+        newEdits[`${r.date}:parent_spend_row`] = String(r.parent_spend_row);
+      } else {
+        newEdits[`${r.date}:adjust_total_installs`] = String(r.adjust_total_installs);
+        newEdits[`${r.date}:installs_us`]           = String(r.installs_us);
+        newEdits[`${r.date}:installs_uk`]           = String(r.installs_uk);
+        newEdits[`${r.date}:installs_row`]          = String(r.installs_row);
+      }
     }
     setEdits(newEdits);
     try { localStorage.setItem(LS_KEY, JSON.stringify(newEdits)); } catch { /* ignore */ }
 
     const payloads = reports.map((r) => ({
       date: r.date,
-      fields: {
-        tiktok_spend: r.tiktok_spend, tiktok_spend_us: r.tiktok_spend_us, tiktok_spend_uk: r.tiktok_spend_uk, tiktok_spend_row: r.tiktok_spend_row,
-        teen_spend: r.teen_spend, teen_spend_us: r.teen_spend_us, teen_spend_uk: r.teen_spend_uk, teen_spend_row: r.teen_spend_row,
-        parent_spend: r.parent_spend, parent_spend_us: r.parent_spend_us, parent_spend_uk: r.parent_spend_uk, parent_spend_row: r.parent_spend_row,
-      },
+      fields: r.type === "tiktok"
+        ? {
+            tiktok_spend: r.tiktok_spend, tiktok_spend_us: r.tiktok_spend_us, tiktok_spend_uk: r.tiktok_spend_uk, tiktok_spend_row: r.tiktok_spend_row,
+            teen_spend: r.teen_spend, teen_spend_us: r.teen_spend_us, teen_spend_uk: r.teen_spend_uk, teen_spend_row: r.teen_spend_row,
+            parent_spend: r.parent_spend, parent_spend_us: r.parent_spend_us, parent_spend_uk: r.parent_spend_uk, parent_spend_row: r.parent_spend_row,
+          }
+        : {
+            adjust_total_installs: r.adjust_total_installs, installs_us: r.installs_us, installs_uk: r.installs_uk, installs_row: r.installs_row,
+          },
     }));
     fetch("/api/v3/save-edits", {
       method: "POST",
