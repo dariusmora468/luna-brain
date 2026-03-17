@@ -12,6 +12,7 @@ function emptyRow(dateStr: string): DailyActualsRow {
     teen_spend: null, teen_spend_us: null, teen_spend_uk: null, teen_spend_row: null,
     parent_spend: null, parent_spend_us: null, parent_spend_uk: null, parent_spend_row: null,
     adjust_total_installs: null, installs_us: null, installs_uk: null, installs_row: null,
+    installs_android: null,
     est_paid_installs: null,
     teen_installs: null, parent_installs: null,
     new_paid_subs: null, revenue: null, mrr: null,

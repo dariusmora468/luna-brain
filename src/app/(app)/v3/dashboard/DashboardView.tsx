@@ -22,6 +22,7 @@ const CH = SVG_H - PAD_T - PAD_B;
 
 type Country  = "all" | "us" | "uk" | "row";
 type Audience = "all" | "teens" | "parents";
+type Platform = "all" | "ios" | "android";
 
 function resolveSpend(r: DailyActualsRow, country: Country, audience: Audience): number | null {
   if (audience === "teens") {
@@ -40,6 +41,14 @@ function resolveSpend(r: DailyActualsRow, country: Country, audience: Audience):
   if (country === "uk")  return r.tiktok_spend_uk;
   if (country === "row") return r.tiktok_spend_row;
   return r.tiktok_spend;
+}
+
+function resolveInstalls(r: DailyActualsRow, platform: Platform): number | null {
+  if (platform === "ios") return r.adjust_total_installs;
+  if (platform === "android") return r.installs_android;
+  // "all": sum iOS + Android (only null if both are null)
+  if (r.adjust_total_installs === null && r.installs_android === null) return null;
+  return (r.adjust_total_installs ?? 0) + (r.installs_android ?? 0);
 }
 
 function resolveTeenSpend(r: DailyActualsRow, country: Country): number | null {
@@ -169,6 +178,7 @@ export default function DashboardView({ dailyRows }: Props) {
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [country, setCountry] = useState<Country>("all");
   const [audience, setAudience] = useState<Audience>("all");
+  const [platform, setPlatform] = useState<Platform>("all");
   const svgRef = useRef<SVGSVGElement>(null);
 
   // Sync edits from localStorage (kept in sync with Metrics sheet)
@@ -194,7 +204,7 @@ export default function DashboardView({ dailyRows }: Props) {
   // Compute a series of SVG points for each metric
   const seriesData = useMemo(() => {
     return METRICS.map((metric) => {
-      // Override getValue for segment-aware spend metrics
+      // Override getValue for segment/platform-aware metrics
       let getVal = metric.getValue;
       if (metric.key === "tiktok_spend") {
         getVal = (r) => resolveSpend(r, country, audience);
@@ -202,8 +212,10 @@ export default function DashboardView({ dailyRows }: Props) {
         getVal = (r) => resolveTeenSpend(r, country);
       } else if (metric.key === "parent_spend") {
         getVal = (r) => resolveParentSpend(r, country);
+      } else if (metric.key === "installs") {
+        getVal = (r) => resolveInstalls(r, platform);
       } else if (metric.key === "cpi") {
-        getVal = (r) => { const s = resolveSpend(r, country, audience); return s !== null && r.adjust_total_installs ? s / r.adjust_total_installs : null; };
+        getVal = (r) => { const s = resolveSpend(r, country, audience); const inst = resolveInstalls(r, platform); return s !== null && inst ? s / inst : null; };
       } else if (metric.key === "cac") {
         getVal = (r) => { const s = resolveSpend(r, country, audience); return s !== null && r.new_paid_subs ? s / r.new_paid_subs : null; };
       }
@@ -229,7 +241,7 @@ export default function DashboardView({ dailyRows }: Props) {
 
       return { metric, values, pts, min, max };
     });
-  }, [sortedRows, lagEnabled, n, country, audience]);
+  }, [sortedRows, lagEnabled, n, country, audience, platform]);
 
   // Hover handler — map mouse X → nearest data index
   const handleMouseMove = useCallback(
@@ -301,6 +313,22 @@ export default function DashboardView({ dailyRows }: Props) {
                 }`}
               >
                 {a === "all" ? "All" : a.charAt(0).toUpperCase() + a.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 w-16">Platform</span>
+          <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
+            {(["all", "ios", "android"] as Platform[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPlatform(p)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all capitalize ${
+                  platform === p ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {p === "all" ? "All" : p === "ios" ? "iOS" : "Android"}
               </button>
             ))}
           </div>
