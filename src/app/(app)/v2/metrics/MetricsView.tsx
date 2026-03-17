@@ -25,8 +25,6 @@ interface AggregatedRow {
   cpi_computed: number | null;
   new_paid_subs: number | null;
   revenue: number | null;
-  viewers_teen: number | null;
-  viewers_parent: number | null;
   trials_teen: number | null;
   trials_parent: number | null;
   cac_computed: number | null;
@@ -145,8 +143,6 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
         cpi_computed: cpi,
         new_paid_subs: r.new_paid_subs,
         revenue: r.revenue,
-        viewers_teen: r.viewers_teen,
-        viewers_parent: r.viewers_parent,
         trials_teen: r.trials_teen,
         trials_parent: r.trials_parent,
         cac_computed: cac,
@@ -185,8 +181,6 @@ function groupRows(rows: DailyActualsRow[], granularity: Granularity, projectedL
       cpi_computed:          cpi,
       new_paid_subs:         subs,
       revenue:               sumOrNull(group.map((r) => r.revenue)),
-      viewers_teen:          sumOrNull(group.map((r) => r.viewers_teen)),
-      viewers_parent:        sumOrNull(group.map((r) => r.viewers_parent)),
       trials_teen:           sumOrNull(group.map((r) => r.trials_teen)),
       trials_parent:         sumOrNull(group.map((r) => r.trials_parent)),
       cac_computed:          cac,
